@@ -22,7 +22,6 @@ const words = [
 io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
-  // CREATE ROOM
   socket.on("createRoom", (name, callback) => {
     const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
 
@@ -39,7 +38,6 @@ io.on("connection", (socket) => {
     callback({ roomCode, players: rooms[roomCode].players });
   });
 
-  // JOIN ROOM
   socket.on("joinRoom", ({ roomCode, name }, callback) => {
     const room = rooms[roomCode];
     if (!room) return callback?.({ error: "Nie ma takiego pokoju" });
@@ -51,24 +49,21 @@ io.on("connection", (socket) => {
     callback?.({ success: true, players: room.players });
   });
 
-  // START GAME
   socket.on("startGame", (roomCode) => {
     startNewRound(roomCode);
   });
 
-  // MESSAGE
   socket.on("message", ({ roomCode, name, message }) => {
     const room = rooms[roomCode];
     if (!room) return;
 
-    const currentPlayerId = room.turnOrder[room.turnIndex];
+    const currentId = room.turnOrder[room.turnIndex];
 
-    // tylko aktywny gracz
-    if (socket.id !== currentPlayerId) return;
+    if (socket.id !== currentId) return;
 
     io.to(roomCode).emit("message", { name, message });
 
-    // IMPOSTOR ZGADŁ
+    // IMPOSTOR WIN
     if (
       socket.id === room.impostorId &&
       message.toLowerCase() === room.currentWord.toLowerCase()
@@ -79,10 +74,10 @@ io.on("connection", (socket) => {
       });
 
       room.history.push(room.currentWord);
+      console.log("HISTORIA:", room.history);
 
       io.to(roomCode).emit("history", room.history);
 
-      // nowa runda
       setTimeout(() => {
         startNewRound(roomCode);
       }, 2000);
@@ -90,19 +85,14 @@ io.on("connection", (socket) => {
       return;
     }
 
-    // następna tura
     room.turnIndex++;
-
     if (room.turnIndex >= room.turnOrder.length) {
       room.turnIndex = 0;
     }
 
-    io.to(roomCode).emit("turn", {
-      playerId: room.turnOrder[room.turnIndex]
-    });
+    sendTurn(roomCode);
   });
 
-  // DISCONNECT
   socket.on("disconnect", () => {
     for (const roomCode in rooms) {
       const room = rooms[roomCode];
@@ -120,7 +110,8 @@ io.on("connection", (socket) => {
 });
 
 
-// 🔥 KLUCZOWA FUNKCJA — NOWA RUNDA
+// 🔥 FUNKCJE POMOCNICZE
+
 function startNewRound(roomCode) {
   const room = rooms[roomCode];
   if (!room) return;
@@ -139,7 +130,6 @@ function startNewRound(roomCode) {
 
   room.turnIndex = 0;
 
-  // role
   room.players.forEach((p) => {
     if (p.id === room.impostorId) {
       io.to(p.id).emit("role", {
@@ -154,17 +144,26 @@ function startNewRound(roomCode) {
     }
   });
 
-  // tura
-  io.to(roomCode).emit("turn", {
-    playerId: room.turnOrder[0]
-  });
+  sendTurn(roomCode);
 
-  // historia (żeby frontend miał aktualną)
   io.to(roomCode).emit("history", room.history);
 }
 
+function sendTurn(roomCode) {
+  const room = rooms[roomCode];
+  if (!room) return;
 
-// PORT (Render-friendly)
+  const currentId = room.turnOrder[room.turnIndex];
+  const player = room.players.find(p => p.id === currentId);
+
+  io.to(roomCode).emit("turn", {
+    playerId: currentId,
+    playerName: player?.name || "?"
+  });
+}
+
+
+// PORT
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
