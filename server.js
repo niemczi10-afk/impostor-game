@@ -4,206 +4,179 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*" } });
+const io = new Server(server);
 
 app.use(express.static("public"));
 
 const rooms = {};
 
+// przykładowe słowa
 const words = [
-  { word: "banan", hint: "żółty owoc" },
-  { word: "samochód", hint: "pojazd na kołach" },
-  { word: "pies", hint: "szczeka" },
-  { word: "szkoła", hint: "uczą się dzieci" }
+  { word: "pies", hint: "zwierzę" },
+  { word: "samochód", hint: "transport" },
+  { word: "pizza", hint: "jedzenie" },
+  { word: "telefon", hint: "technologia" },
 ];
 
-io.on("connection", (socket) => {
-  console.log("user:", socket.id);
+function createRoomCode() {
+  return Math.random().toString(36).substr(2, 5);
+}
 
-  // CREATE ROOM
-  socket.on("createRoom", (name, cb) => {
-    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
+io.on("connection", (socket) => {
+  console.log("user connected", socket.id);
+
+  socket.on("createRoom", (name) => {
+    const code = createRoomCode();
 
     rooms[code] = {
-      hostId: socket.id,
-      players: [{ id: socket.id, name }],
-      phase: "WAIT",
-      round: 0,
-      impostorId: null,
-      word: "",
+      players: [],
+      host: socket.id,
+      started: false,
+      word: null,
+      hint: null,
+      impostor: null,
       answers: {},
-      votes: {}
+      votes: {},
     };
 
-    socket.join(code);
-
-    cb({
-      roomCode: code,
-      players: rooms[code].players,
-      hostId: socket.id
+    rooms[code].players.push({
+      id: socket.id,
+      name,
     });
+
+    socket.join(code);
+    socket.emit("roomJoined", code);
 
     io.to(code).emit("updatePlayers", rooms[code].players);
   });
 
-  // JOIN ROOM
-  socket.on("joinRoom", ({ roomCode, name }, cb) => {
-    const room = rooms[roomCode];
-    if (!room) return cb?.({ error: "brak pokoju" });
+  socket.on("joinRoom", ({ code, name }) => {
+    const room = rooms[code];
+    if (!room) return;
 
     room.players.push({ id: socket.id, name });
-    socket.join(roomCode);
 
-    cb?.({
-      success: true,
-      players: room.players,
-      hostId: room.hostId
+    socket.join(code);
+    socket.emit("roomJoined", code);
+
+    io.to(code).emit("updatePlayers", room.players);
+  });
+
+  socket.on("startGame", (code) => {
+    const room = rooms[code];
+    if (!room) return;
+    if (room.host !== socket.id) return;
+
+    const random = words[Math.floor(Math.random() * words.length)];
+
+    room.word = random.word;
+    room.hint = random.hint;
+    room.answers = {};
+    room.votes = {};
+
+    const impostor =
+      room.players[Math.floor(Math.random() * room.players.length)];
+
+    room.impostor = impostor.id;
+
+    room.players.forEach((p) => {
+      if (p.id === room.impostor) {
+        io.to(p.id).emit("role", {
+          role: "impostor",
+          hint: room.hint,
+        });
+      } else {
+        io.to(p.id).emit("role", {
+          role: "crewmate",
+          word: room.word,
+        });
+      }
     });
 
-    io.to(roomCode).emit("updatePlayers", room.players);
+    io.to(code).emit("roundStart");
   });
 
-  // START GAME
-  socket.on("startGame", (roomCode) => {
-    const room = rooms[roomCode];
-    if (!room || socket.id !== room.hostId) return;
+  socket.on("message", ({ code, text }) => {
+    const room = rooms[code];
+    if (!room) return;
 
-    startGame(roomCode);
-  });
+    room.answers[socket.id] = text;
 
-  // MESSAGE (RUNDA)
-  socket.on("message", ({ roomCode, message, name }) => {
-    const room = rooms[roomCode];
-    if (!room || room.phase !== "PLAY") return;
+    io.to(code).emit("message", {
+      player: socket.id,
+      text,
+    });
 
-    room.answers[socket.id] = message;
-
-    io.to(roomCode).emit("message", { name, message });
-
-    // IMP WIN
-    if (
-      socket.id === room.impostorId &&
-      message.toLowerCase() === room.word.toLowerCase()
-    ) {
-      io.to(roomCode).emit("gameEnd", {
-        winner: "IMPOSTOR",
-        word: room.word
+    // impostor zgadł słowo
+    if (socket.id === room.impostor && text === room.word) {
+      io.to(code).emit("gameEnd", {
+        winner: "impostor",
+        word: room.word,
       });
-
-      setTimeout(() => startGame(roomCode), 2000);
       return;
     }
 
-    // ALL ANSWERED -> VOTE
+    // wszyscy odpowiedzieli
     if (Object.keys(room.answers).length === room.players.length) {
-      startVote(roomCode);
+      io.to(code).emit("voteStart");
     }
   });
 
-  // VOTE
-  socket.on("vote", ({ roomCode, targetId }) => {
-    const room = rooms[roomCode];
-    if (!room || room.phase !== "VOTE") return;
+  socket.on("vote", ({ code, target }) => {
+    const room = rooms[code];
+    if (!room) return;
 
-    room.votes[socket.id] = targetId;
+    room.votes[socket.id] = target;
 
-    const allVoted =
-      Object.keys(room.votes).length === room.players.length;
+    if (Object.keys(room.votes).length === room.players.length) {
+      const counts = {};
 
-    if (!allVoted) return;
-
-    const counts = {};
-    Object.values(room.votes).forEach(v => {
-      counts[v] = (counts[v] || 0) + 1;
-    });
-
-    const max = Math.max(...Object.values(counts));
-    const winners = Object.keys(counts).filter(k => counts[k] === max);
-
-    // brak jednoznaczności = impostor win
-    if (winners.length !== 1) {
-      io.to(roomCode).emit("gameEnd", {
-        winner: "IMPOSTOR",
-        word: room.word
+      Object.values(room.votes).forEach((v) => {
+        if (!v) return;
+        counts[v] = (counts[v] || 0) + 1;
       });
 
-      setTimeout(() => startGame(roomCode), 2000);
-      return;
+      let max = 0;
+      let winner = null;
+      let tie = false;
+
+      for (let k in counts) {
+        if (counts[k] > max) {
+          max = counts[k];
+          winner = k;
+          tie = false;
+        } else if (counts[k] === max) {
+          tie = true;
+        }
+      }
+
+      if (tie || !winner) {
+        io.to(code).emit("gameEnd", {
+          winner: "impostor",
+          word: room.word,
+        });
+      } else if (winner === room.impostor) {
+        io.to(code).emit("gameEnd", {
+          winner: "crewmates",
+          word: room.word,
+        });
+      } else {
+        io.to(code).emit("gameEnd", {
+          winner: "impostor",
+          word: room.word,
+        });
+      }
     }
-
-    const voted = winners[0];
-    const correct = voted === room.impostorId;
-
-    io.to(roomCode).emit("gameEnd", {
-      winner: correct ? "CREWMATES" : "IMPOSTOR",
-      word: room.word
-    });
-
-    setTimeout(() => startGame(roomCode), 2000);
   });
 
-  // DISCONNECT
   socket.on("disconnect", () => {
-    for (const code in rooms) {
-      const r = rooms[code];
+    for (let code in rooms) {
+      const room = rooms[code];
+      room.players = room.players.filter((p) => p.id !== socket.id);
 
-      r.players = r.players.filter(p => p.id !== socket.id);
-
-      if (r.players.length === 0) delete rooms[code];
-      else io.to(code).emit("updatePlayers", r.players);
+      io.to(code).emit("updatePlayers", room.players);
     }
   });
 });
 
-
-// =====================
-// START GAME
-// =====================
-function startGame(code) {
-  const room = rooms[code];
-  if (!room) return;
-
-  const w = words[Math.floor(Math.random() * words.length)];
-
-  room.word = w.word;
-  room.phase = "PLAY";
-  room.answers = {};
-  room.votes = {};
-  room.round++;
-
-  const impostor =
-    room.players[Math.floor(Math.random() * room.players.length)];
-
-  room.impostorId = impostor.id;
-
-  room.players.forEach(p => {
-    io.to(p.id).emit("role", {
-      role: p.id === room.impostorId ? "IMPOSTOR" : "CREWMATE",
-      hint: w.hint,
-      word: w.word
-    });
-  });
-
-  io.to(code).emit("roundStart", { round: room.round });
-}
-
-
-// =====================
-// VOTE START
-// =====================
-function startVote(code) {
-  const room = rooms[code];
-  if (!room) return;
-
-  room.phase = "VOTE";
-  room.votes = {};
-
-  io.to(code).emit("voteStart", {
-    players: room.players
-  });
-}
-
-
-// =====================
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log("OK"));
+server.listen(3000, () => console.log("server running"));
