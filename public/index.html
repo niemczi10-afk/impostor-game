@@ -61,13 +61,13 @@
       cursor: not-allowed;
     }
 
-    .players, .chat {
+    .players, .chat, .turn-order {
       list-style: none;
       padding: 0;
       margin: 0;
     }
 
-    .players li, .chat li {
+    .players li, .chat li, .turn-order li {
       padding: 8px 10px;
       border-bottom: 1px solid #243041;
     }
@@ -119,11 +119,6 @@
     .msg-player {
       color: #ffffff;
     }
-
-    .msg-player .name {
-      color: #ffffff;
-      font-weight: 700;
-    }
   </style>
 </head>
 <body>
@@ -149,6 +144,12 @@
 
         <h3>Gracze</h3>
         <ul class="players" id="playersList"></ul>
+
+        <div style="height: 1px; background: #243041; margin: 14px 0;"></div>
+
+        <h3>Kolejność odpowiadania</h3>
+        <div class="small">Ta kolejność zostaje taka sama przez całą grę.</div>
+        <ul class="turn-order" id="turnOrderList"></ul>
       </div>
     </div>
 
@@ -181,6 +182,8 @@
     let currentRound = 0;
     let currentTurnPlayerId = null;
     let currentPhase = "lobby";
+    let playersCache = [];
+    let turnOrderCache = [];
 
     const lobbyPanel = document.getElementById("lobbyPanel");
     const roomPanel = document.getElementById("roomPanel");
@@ -188,6 +191,7 @@
     const roundLabel = document.getElementById("roundLabel");
     const turnLabel = document.getElementById("turnLabel");
     const playersList = document.getElementById("playersList");
+    const turnOrderList = document.getElementById("turnOrderList");
     const chatList = document.getElementById("chatList");
     const roleLabel = document.getElementById("roleLabel");
     const startBtn = document.getElementById("startBtn");
@@ -217,6 +221,24 @@
         const li = document.createElement("li");
         li.textContent = p.name + (p.id === hostId ? " — host" : "");
         playersList.appendChild(li);
+      });
+    }
+
+    function renderTurnOrder(turnOrder) {
+      turnOrderList.innerHTML = "";
+
+      if (!turnOrder || !turnOrder.length) {
+        const li = document.createElement("li");
+        li.textContent = "Brak ustalonej kolejności.";
+        turnOrderList.appendChild(li);
+        return;
+      }
+
+      turnOrder.forEach((id, index) => {
+        const player = playersCache.find((p) => p.id === id);
+        const li = document.createElement("li");
+        li.textContent = `${index + 1}. ${player ? player.name : "Gracz"}`;
+        turnOrderList.appendChild(li);
       });
     }
 
@@ -281,13 +303,17 @@
       refreshStartButton(currentPhase);
     });
 
-    socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round }) => {
+    socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round, turnOrder, currentTurnPlayerId: turnPlayerId }) => {
       hostId = newHostId;
       currentPhase = phase || currentPhase;
       currentRound = round || currentRound || 0;
+      playersCache = players || [];
+      turnOrderCache = turnOrder || [];
+      currentTurnPlayerId = turnPlayerId || currentTurnPlayerId;
 
       roundLabel.textContent = `Runda: ${currentRound || "—"}`;
-      renderPlayers(players);
+      renderPlayers(playersCache);
+      renderTurnOrder(turnOrderCache);
       refreshStartButton(currentPhase);
       setMessageState();
     });
