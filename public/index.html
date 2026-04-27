@@ -85,6 +85,17 @@
       background: #374151 !important;
       cursor: not-allowed;
     }
+
+    #roomCodeDisplay {
+      font-weight: bold;
+      color: #60a5fa;
+      margin-top: 5px;
+    }
+
+    #startBtn {
+      margin-top: 10px;
+      display: none;
+    }
   </style>
 </head>
 
@@ -103,7 +114,12 @@
     <input id="room" placeholder="Kod pokoju">
     <button onclick="joinRoom()">Dołącz</button>
 
-    <button onclick="startGame()">Start gry</button>
+    <div class="card">
+      <h3>🔑 Kod pokoju</h3>
+      <div id="roomCodeDisplay">---</div>
+    </div>
+
+    <button id="startBtn" onclick="startGame()">Start gry (HOST)</button>
 
     <div class="card">
       <h3>👥 Gracze</h3>
@@ -147,6 +163,7 @@ let currentRoom = "";
 let myName = "";
 let myId = null;
 let currentTurnId = null;
+let hostId = null;
 
 /* CONNECT */
 socket.on("connect", () => {
@@ -159,9 +176,17 @@ function createRoom() {
 
   socket.emit("createRoom", myName, (res) => {
     currentRoom = res.roomCode;
+    hostId = res.hostId;
+
+    document.getElementById("roomCodeDisplay").innerText =
+      "Kod: " + currentRoom;
+
     updatePlayers(res.players);
 
-    // reset UI
+    if (hostId === myId) {
+      document.getElementById("startBtn").style.display = "block";
+    }
+
     resetUI();
   });
 }
@@ -175,6 +200,11 @@ function joinRoom() {
     if (res.error) return alert(res.error);
 
     currentRoom = code;
+    hostId = res.hostId;
+
+    document.getElementById("roomCodeDisplay").innerText =
+      "Kod: " + currentRoom;
+
     updatePlayers(res.players);
 
     resetUI();
@@ -220,13 +250,12 @@ socket.on("role", (data) => {
   }
 });
 
-/* TURN (POPRAWIONE) */
+/* TURN */
 socket.on("turn", (data) => {
   currentTurnId = data.playerId;
 
   if (currentTurnId === myId) {
-    document.getElementById("turn").innerText =
-      "👉 TWOJA TURA";
+    document.getElementById("turn").innerText = "👉 TWOJA TURA";
     enableInput(true);
   } else {
     document.getElementById("turn").innerText =
@@ -235,17 +264,13 @@ socket.on("turn", (data) => {
   }
 });
 
-/* HISTORY (POPRAWIONE + DEBUG) */
+/* HISTORY */
 socket.on("history", (history) => {
-  console.log("HISTORIA:", history);
-
   const ul = document.getElementById("history");
   ul.innerHTML = "";
 
   if (!history || history.length === 0) {
-    const li = document.createElement("li");
-    li.innerText = "Brak haseł";
-    ul.appendChild(li);
+    ul.innerHTML = "<li>Brak haseł</li>";
     return;
   }
 
@@ -262,7 +287,6 @@ socket.on("gameEnd", (data) => {
 });
 
 /* HELPERS */
-
 function enableInput(state) {
   const input = document.getElementById("msg");
   const btn = document.getElementById("sendBtn");
@@ -271,7 +295,6 @@ function enableInput(state) {
   btn.style.opacity = state ? "1" : "0.5";
 }
 
-/* RESET UI (NOWE) */
 function resetUI() {
   document.getElementById("chat").innerHTML = "";
   document.getElementById("history").innerHTML = "";
@@ -280,7 +303,6 @@ function resetUI() {
   enableInput(false);
 }
 
-/* PLAYERS */
 function updatePlayers(players) {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
