@@ -36,7 +36,6 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomCode);
-
     callback({ roomCode, players: rooms[roomCode].players });
   });
 
@@ -52,67 +51,24 @@ io.on("connection", (socket) => {
     callback?.({ success: true, players: room.players });
   });
 
-  // START GAME / NEW ROUND
+  // START GAME
   socket.on("startGame", (roomCode) => {
-    const room = rooms[roomCode];
-    if (!room) return;
-
-    if (room.players.length < 3 || room.players.length > 6) {
-      return;
-    }
-
-    // LOSOWE SŁOWO
-    const randomWord = words[Math.floor(Math.random() * words.length)];
-    room.currentWord = randomWord.word;
-
-    // LOSOWY IMPOSTOR
-    const impostorIndex = Math.floor(Math.random() * room.players.length);
-    room.impostorId = room.players[impostorIndex].id;
-
-    // LOSOWA KOLEJNOŚĆ
-    room.turnOrder = [...room.players]
-      .sort(() => Math.random() - 0.5)
-      .map(p => p.id);
-
-    room.turnIndex = 0;
-
-    // WYŚLIJ ROLE
-    room.players.forEach((p) => {
-      if (p.id === room.impostorId) {
-        io.to(p.id).emit("role", {
-          role: "IMPOSTOR",
-          hint: randomWord.hint
-        });
-      } else {
-        io.to(p.id).emit("role", {
-          role: "CREWMATE",
-          word: randomWord.word
-        });
-      }
-    });
-
-    // INFO KTO MA TURĘ
-    io.to(roomCode).emit("turn", {
-      playerId: room.turnOrder[room.turnIndex]
-    });
-
-    io.to(roomCode).emit("history", room.history);
+    startNewRound(roomCode);
   });
 
-  // MESSAGE (TYLKO AKTYWNY GRACZ)
+  // MESSAGE
   socket.on("message", ({ roomCode, name, message }) => {
     const room = rooms[roomCode];
     if (!room) return;
 
     const currentPlayerId = room.turnOrder[room.turnIndex];
 
-    // BLOKADA: tylko gracz z turą może pisać
+    // tylko aktywny gracz
     if (socket.id !== currentPlayerId) return;
 
-    // WYŚLIJ WIADOMOŚĆ
     io.to(roomCode).emit("message", { name, message });
 
-    // SPRAWDŹ CZY IMPOSTOR ZGADŁ
+    // IMPOSTOR ZGADŁ
     if (
       socket.id === room.impostorId &&
       message.toLowerCase() === room.currentWord.toLowerCase()
@@ -121,21 +77,20 @@ io.on("connection", (socket) => {
         winner: "IMPOSTOR",
         word: room.currentWord
       });
-    
+
       room.history.push(room.currentWord);
-    
-      // 🔥 WYŚLIJ HISTORIĘ
+
       io.to(roomCode).emit("history", room.history);
-    
-      // 🔁 NOWA RUNDA PO 2 SEKUNDACH
+
+      // nowa runda
       setTimeout(() => {
         startNewRound(roomCode);
       }, 2000);
-    
-      return; // 🔥 ZOSTAW TO
+
+      return;
     }
 
-    // NASTĘPNA TURA
+    // następna tura
     room.turnIndex++;
 
     if (room.turnIndex >= room.turnOrder.length) {
@@ -164,6 +119,54 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(3000, () => {
-  console.log("Serwer działa na http://localhost:3000");
+
+// 🔥 KLUCZOWA FUNKCJA — NOWA RUNDA
+function startNewRound(roomCode) {
+  const room = rooms[roomCode];
+  if (!room) return;
+
+  if (room.players.length < 3 || room.players.length > 6) return;
+
+  const randomWord = words[Math.floor(Math.random() * words.length)];
+  room.currentWord = randomWord.word;
+
+  const impostorIndex = Math.floor(Math.random() * room.players.length);
+  room.impostorId = room.players[impostorIndex].id;
+
+  room.turnOrder = [...room.players]
+    .sort(() => Math.random() - 0.5)
+    .map(p => p.id);
+
+  room.turnIndex = 0;
+
+  // role
+  room.players.forEach((p) => {
+    if (p.id === room.impostorId) {
+      io.to(p.id).emit("role", {
+        role: "IMPOSTOR",
+        hint: randomWord.hint
+      });
+    } else {
+      io.to(p.id).emit("role", {
+        role: "CREWMATE",
+        word: randomWord.word
+      });
+    }
+  });
+
+  // tura
+  io.to(roomCode).emit("turn", {
+    playerId: room.turnOrder[0]
+  });
+
+  // historia (żeby frontend miał aktualną)
+  io.to(roomCode).emit("history", room.history);
+}
+
+
+// PORT (Render-friendly)
+const PORT = process.env.PORT || 3000;
+
+server.listen(PORT, () => {
+  console.log("Serwer działa");
 });
