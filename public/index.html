@@ -67,9 +67,127 @@
       margin: 0;
     }
 
-    .players li, .chat li, .turn-order li {
+    .players li, .chat li {
       padding: 8px 10px;
       border-bottom: 1px solid #243041;
+    }
+
+    /* Turn order lista */
+    .turn-order {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .turn-order li {
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: background 0.35s ease, border-color 0.35s ease, box-shadow 0.35s ease;
+    }
+
+    .turn-order li .turn-number {
+      font-size: 0.78rem;
+      color: #475569;
+      min-width: 18px;
+      transition: color 0.3s;
+    }
+
+    .turn-order li .turn-name {
+      flex: 1;
+      font-size: 0.95rem;
+      transition: color 0.3s, font-weight 0.3s;
+    }
+
+    .turn-order li .turn-arrow {
+      font-size: 0.75rem;
+      opacity: 0;
+      transform: translateX(-4px);
+      transition: opacity 0.3s ease, transform 0.3s ease, color 0.3s;
+    }
+
+    .turn-order li .turn-badge {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 3px 9px;
+      border-radius: 999px;
+      opacity: 0;
+      transform: scale(0.75);
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      white-space: nowrap;
+    }
+
+    /* Aktywna tura — inny gracz */
+    .turn-order li.active-turn {
+      background: rgba(37, 99, 235, 0.1);
+      border-color: rgba(37, 99, 235, 0.35);
+    }
+
+    .turn-order li.active-turn .turn-arrow {
+      opacity: 1;
+      transform: translateX(0);
+      color: #60a5fa;
+    }
+
+    .turn-order li.active-turn .turn-badge {
+      opacity: 1;
+      transform: scale(1);
+      background: rgba(37, 99, 235, 0.2);
+      color: #93c5fd;
+      border: 1px solid rgba(37, 99, 235, 0.4);
+    }
+
+    .turn-order li.active-turn .turn-name {
+      color: #bfdbfe;
+    }
+
+    /* Moja tura */
+    .turn-order li.my-turn {
+      background: rgba(16, 185, 129, 0.1);
+      border-color: rgba(16, 185, 129, 0.4);
+      animation: pulse-row 2s ease-in-out infinite;
+    }
+
+    .turn-order li.my-turn .turn-number {
+      color: #34d399;
+    }
+
+    .turn-order li.my-turn .turn-name {
+      color: #a7f3d0;
+      font-weight: 700;
+    }
+
+    .turn-order li.my-turn .turn-arrow {
+      opacity: 1;
+      transform: translateX(0);
+      color: #34d399;
+      animation: arrow-bounce 0.8s ease-in-out infinite alternate;
+    }
+
+    .turn-order li.my-turn .turn-badge {
+      opacity: 1;
+      transform: scale(1);
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.45);
+    }
+
+    @keyframes pulse-row {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+      }
+      50% {
+        box-shadow: 0 0 0 5px rgba(16, 185, 129, 0.12);
+      }
+    }
+
+    @keyframes arrow-bounce {
+      from { transform: translateX(0); }
+      to   { transform: translateX(5px); }
     }
 
     .chat-box {
@@ -206,7 +324,6 @@
       li.className = system ? "msg-system" : "msg-player";
       li.textContent = system ? `• ${text}` : text;
       chatList.appendChild(li);
-
       const box = document.querySelector(".chat-box");
       box.scrollTop = box.scrollHeight;
     }
@@ -217,7 +334,6 @@
 
     function renderPlayers(players) {
       playersList.innerHTML = "";
-
       players.forEach((p) => {
         const li = document.createElement("li");
         li.textContent = p.name + (p.id === hostId ? " — host" : "");
@@ -225,7 +341,7 @@
       });
     }
 
-    function renderTurnOrder(turnOrder) {
+    function renderTurnOrder(turnOrder, activeTurnPlayerId) {
       turnOrderList.innerHTML = "";
 
       if (!turnOrder || !turnOrder.length) {
@@ -237,8 +353,37 @@
 
       turnOrder.forEach((id, index) => {
         const player = playersCache.find((p) => p.id === id);
+        const name = player ? player.name : "Gracz";
+        const isActive = id === activeTurnPlayerId;
+        const isMe = isActive && id === socket.id;
+
         const li = document.createElement("li");
-        li.textContent = `${index + 1}. ${player ? player.name : "Gracz"}`;
+        if (isMe) {
+          li.className = "my-turn";
+        } else if (isActive) {
+          li.className = "active-turn";
+        }
+
+        const numSpan = document.createElement("span");
+        numSpan.className = "turn-number";
+        numSpan.textContent = `${index + 1}.`;
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "turn-name";
+        nameSpan.textContent = name;
+
+        const arrowSpan = document.createElement("span");
+        arrowSpan.className = "turn-arrow";
+        arrowSpan.textContent = "▶";
+
+        const badgeSpan = document.createElement("span");
+        badgeSpan.className = "turn-badge";
+        badgeSpan.textContent = isMe ? "TWOJA TURA!" : "teraz gra";
+
+        li.appendChild(numSpan);
+        li.appendChild(nameSpan);
+        li.appendChild(arrowSpan);
+        li.appendChild(badgeSpan);
         turnOrderList.appendChild(li);
       });
     }
@@ -246,7 +391,6 @@
     function refreshStartButton(phase) {
       const isHost = socket.id === hostId;
       const canShow = isHost && (phase === "lobby" || phase === "ended");
-
       startBtn.classList.toggle("hidden", !canShow);
       startBtn.textContent = phase === "ended" ? "Start nowej gry" : "Start gry";
     }
@@ -265,9 +409,7 @@
 
     function sendMessage() {
       const text = messageInput.value.trim();
-      if (!text) return;
-      if (messageInput.disabled) return;
-
+      if (!text || messageInput.disabled) return;
       socket.emit("message", { code: roomCode, text });
       messageInput.value = "";
     }
@@ -292,15 +434,10 @@
     document.getElementById("sendBtn").addEventListener("click", sendMessage);
 
     messageInput.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        sendMessage();
-      }
+      if (e.key === "Enter") { e.preventDefault(); sendMessage(); }
     });
 
-    // Automatyczny reconnect — gdy socket się rozłączy i połączy ponownie
     socket.on("connect", () => {
-      // Jeśli byliśmy już w pokoju, spróbuj się reconnectować
       if (roomCode && myNick) {
         socket.emit("joinRoom", { code: roomCode, name: myNick });
       }
@@ -310,10 +447,7 @@
       hostId = newHostId;
       showRoom(code);
       refreshStartButton(currentPhase);
-
-      if (reconnected) {
-        appendChat("Połączono ponownie z pokojem.", true);
-      }
+      if (reconnected) appendChat("Połączono ponownie z pokojem.", true);
     });
 
     socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round, turnOrder, currentTurnPlayerId: turnPlayerId }) => {
@@ -326,14 +460,13 @@
 
       roundLabel.textContent = `Runda: ${currentRound || "—"}`;
       renderPlayers(playersCache);
-      renderTurnOrder(turnOrderCache);
+      renderTurnOrder(turnOrderCache, currentTurnPlayerId);
       refreshStartButton(currentPhase);
       setMessageState();
     });
 
     socket.on("role", (data) => {
       myRole = data.role;
-
       if (data.role === "impostor") {
         roleLabel.textContent = `Twoja rola: IMPOSTOR. Podpowiedź: ${data.hint}`;
       } else {
@@ -361,11 +494,10 @@
         ? `Twoja tura (${turnNumber}/${total})`
         : `Tura: ${playerName} (${turnNumber}/${total})`;
 
+      renderTurnOrder(turnOrderCache, currentTurnPlayerId);
       setMessageState();
 
-      if (playerId === socket.id) {
-        messageInput.focus();
-      }
+      if (playerId === socket.id) messageInput.focus();
     });
 
     socket.on("gameReset", () => {
@@ -379,15 +511,12 @@
       currentTurnPlayerId = null;
       messageInput.value = "";
       messageInput.disabled = true;
+      renderTurnOrder(turnOrderCache, null);
       refreshStartButton(currentPhase);
     });
 
     socket.on("message", (data) => {
-      if (data.system) {
-        appendChat(data.text, true);
-        return;
-      }
-
+      if (data.system) { appendChat(data.text, true); return; }
       appendChat(`${data.playerName}: ${data.text}`);
     });
 
@@ -395,18 +524,19 @@
       currentPhase = "vote";
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
+      currentTurnPlayerId = null;
+
+      renderTurnOrder(turnOrderCache, null);
 
       votePanel.classList.remove("hidden");
       voteButtons.innerHTML = "";
       voteInfo.textContent = "Wybierz gracza albo wstrzymaj się od głosu.";
 
       messageInput.disabled = true;
-      currentTurnPlayerId = null;
       turnLabel.textContent = "Tura: głosowanie";
 
       players.forEach((player) => {
         if (player.id === socket.id) return;
-
         const btn = document.createElement("button");
         btn.textContent = `Głosuję na: ${player.name}`;
         btn.addEventListener("click", () => {
@@ -440,6 +570,8 @@
       messageInput.disabled = true;
       currentTurnPlayerId = null;
       turnLabel.textContent = "Tura: —";
+
+      renderTurnOrder(turnOrderCache, null);
 
       if (winner === "crewmates") {
         appendChat(`Gra zakończona. Wygrywają crewmates! Impostor: ${impostorName}. Hasło: ${word}`, true);
