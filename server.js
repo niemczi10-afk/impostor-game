@@ -23,12 +23,13 @@ io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
   // =====================
-  // CREATE ROOM
+  // CREATE ROOM (HOST FIX)
   // =====================
   socket.on("createRoom", (name, callback) => {
     const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
 
     rooms[roomCode] = {
+      hostId: socket.id,
       players: [{ id: socket.id, name }],
       turnIndex: 0,
       turnOrder: [],
@@ -41,11 +42,11 @@ io.on("connection", (socket) => {
 
     callback({
       roomCode,
-      players: rooms[roomCode].players
+      players: rooms[roomCode].players,
+      hostId: socket.id
     });
 
-    // 🔥 SYNC STANU
-    io.to(socket.id).emit("history", rooms[roomCode].history);
+    io.to(socket.id).emit("history", []);
   });
 
   // =====================
@@ -60,9 +61,12 @@ io.on("connection", (socket) => {
 
     io.to(roomCode).emit("updatePlayers", room.players);
 
-    callback?.({ success: true, players: room.players });
+    callback?.({
+      success: true,
+      players: room.players,
+      hostId: room.hostId
+    });
 
-    // 🔥 KLUCZOWY FIX: SYNC STANU DLA NOWEGO GRACZA
     io.to(socket.id).emit("history", room.history);
 
     if (room.turnOrder.length > 0) {
@@ -71,9 +75,14 @@ io.on("connection", (socket) => {
   });
 
   // =====================
-  // START GAME
+  // START GAME (HOST ONLY)
   // =====================
   socket.on("startGame", (roomCode) => {
+    const room = rooms[roomCode];
+    if (!room) return;
+
+    if (socket.id !== room.hostId) return;
+
     startNewRound(roomCode);
   });
 
@@ -134,8 +143,6 @@ io.on("connection", (socket) => {
         delete rooms[roomCode];
       } else {
         io.to(roomCode).emit("updatePlayers", room.players);
-
-        // 🔥 FIX SYNC PO DISCONNECT
         sendTurn(roomCode);
       }
     }
@@ -180,13 +187,12 @@ function startNewRound(roomCode) {
 
   sendTurn(roomCode);
 
-  // 🔥 HISTORY ALWAYS SYNC
   io.to(roomCode).emit("history", room.history);
 }
 
 
 // =====================
-// TURN SYNC (FIXED)
+// TURN
 // =====================
 function sendTurn(roomCode) {
   const room = rooms[roomCode];
