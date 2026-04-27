@@ -8,55 +8,39 @@ const io = new Server(server, {
   cors: { origin: "*" }
 });
 
-// 🔥 TO JEST KLUCZ
 app.use(express.static("public"));
 
 const rooms = {};
 
+const words = [
+  { word: "banan", hint: "żółty owoc" },
+  { word: "samochód", hint: "pojazd na kołach" },
+  { word: "pies", hint: "szczeka i ma ogon" },
+  { word: "szkoła", hint: "uczą się tam dzieci" }
+];
+
 io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
-  // CREATE ROOM
-socket.on("startGame", (roomCode, callback) => {
-  const room = rooms[roomCode];
-  if (!room) return;
+  // CREATE ROOM (BRAKOWAŁO)
+  socket.on("createRoom", (name, callback) => {
+    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
 
-  if (room.players.length < 3) {
-    return callback({ error: "Minimum 3 graczy" });
-  }
+    rooms[roomCode] = {
+      players: [{ id: socket.id, name }]
+    };
 
-  if (room.players.length > 6) {
-    return callback({ error: "Maksymalnie 6 graczy" });
-  }
+    socket.join(roomCode);
 
-  const randomWord = words[Math.floor(Math.random() * words.length)];
-
-  const impostorIndex = Math.floor(Math.random() * room.players.length);
-  const impostorId = room.players[impostorIndex].id;
-
-  room.players.forEach((p) => {
-    if (p.id === impostorId) {
-      io.to(p.id).emit("role", {
-        role: "IMPOSTOR",
-        hint: randomWord.hint
-      });
-    } else {
-      io.to(p.id).emit("role", {
-        role: "CREWMATE",
-        word: randomWord.word
-      });
-    }
+    callback({ roomCode, players: rooms[roomCode].players });
   });
-
-  io.to(roomCode).emit("gameStarted");
-});
 
   // JOIN ROOM
   socket.on("joinRoom", ({ roomCode, name }, callback) => {
     const room = rooms[roomCode];
 
     if (!room) {
-      return callback({ error: "Nie ma takiego pokoju" });
+      return callback?.({ error: "Nie ma takiego pokoju" });
     }
 
     room.players.push({ id: socket.id, name });
@@ -64,7 +48,44 @@ socket.on("startGame", (roomCode, callback) => {
 
     io.to(roomCode).emit("updatePlayers", room.players);
 
-    callback({ success: true, players: room.players });
+    callback?.({ success: true, players: room.players });
+  });
+
+  // START GAME (POPRAWIONE)
+  socket.on("startGame", (roomCode, callback) => {
+    const room = rooms[roomCode];
+    if (!room) return callback?.({ error: "Brak pokoju" });
+
+    if (room.players.length < 3) {
+      return callback?.({ error: "Minimum 3 graczy" });
+    }
+
+    if (room.players.length > 6) {
+      return callback?.({ error: "Maksymalnie 6 graczy" });
+    }
+
+    const randomWord = words[Math.floor(Math.random() * words.length)];
+
+    const impostorIndex = Math.floor(Math.random() * room.players.length);
+    const impostorId = room.players[impostorIndex].id;
+
+    room.players.forEach((p) => {
+      if (p.id === impostorId) {
+        io.to(p.id).emit("role", {
+          role: "IMPOSTOR",
+          hint: randomWord.hint
+        });
+      } else {
+        io.to(p.id).emit("role", {
+          role: "CREWMATE",
+          word: randomWord.word
+        });
+      }
+    });
+
+    io.to(roomCode).emit("gameStarted");
+
+    callback?.({ success: true });
   });
 
   // CHAT
@@ -72,16 +93,11 @@ socket.on("startGame", (roomCode, callback) => {
     io.to(roomCode).emit("message", { name, message });
   });
 
-  const words = [
-    { word: "banan", hint: "żółty owoc" },
-    { word: "samochód", hint: "pojazd na kołach" },
-    { word: "pies", hint: "szczeka i ma ogon" },
-    { word: "szkoła", hint: "uczą się tam dzieci" }
-  ];
-  
   // DISCONNECT
   socket.on("disconnect", () => {
     for (const roomCode in rooms) {
+      if (!rooms[roomCode]) continue;
+
       rooms[roomCode].players = rooms[roomCode].players.filter(
         p => p.id !== socket.id
       );
