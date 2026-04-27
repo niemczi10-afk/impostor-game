@@ -12,7 +12,6 @@ const rooms = {};
 
 const words = require("./words");
 
-// Mapa: nick+pokój -> socket.id (do reconnectu)
 const disconnectTimers = {};
 
 function createRoomCode() {
@@ -135,7 +134,6 @@ function startNewGame(room) {
   const impostor = pickRandom(room.players);
   room.impostorId = impostor.id;
 
-  // Kolejność odpowiadania losowana tylko raz na całą grę
   room.turnOrder = shuffleArray(room.players.map((p) => p.id));
   room.turnIndex = 0;
 
@@ -220,26 +218,14 @@ function removePlayerFromActiveRound(room, playerId) {
       room.turnIndex -= 1;
     }
 
-  if (room.phase === "play") {
-    emitTurn(room);  // emituje do całego pokoju, wszyscy dostają świeży turnStart
-  } else if (room.phase === "vote") {
-    io.to(socket.id).emit("voteStart", {
-      round: room.round,
-      players: room.players,
-    });
-  }
-
-      if (!currentId) {
+    if (room.phase === "play") {
+      if (room.turnIndex >= room.turnOrder.length) {
         startVotePhase(room);
         return;
       }
 
-      if (playerId === currentId) {
-        if (room.turnIndex >= room.turnOrder.length) {
-          startVotePhase(room);
-        } else {
-          emitTurn(room);
-        }
+      if (orderIndex === room.turnIndex) {
+        emitTurn(room);
       }
     }
   }
@@ -313,7 +299,6 @@ io.on("connection", (socket) => {
     );
 
     if (existingPlayer) {
-      // Anuluj timer disconnectu jeśli istnieje
       const timerKey = `${roomCode}:${playerName.toLowerCase()}`;
       if (disconnectTimers[timerKey]) {
         clearTimeout(disconnectTimers[timerKey]);
@@ -323,23 +308,19 @@ io.on("connection", (socket) => {
       const oldId = existingPlayer.id;
       existingPlayer.id = socket.id;
 
-      // Zaktualizuj impostorId jeśli ten gracz był impostorem
       if (room.impostorId === oldId) {
         room.impostorId = socket.id;
       }
 
-      // Zaktualizuj hostId jeśli ten gracz był hostem
       if (room.hostId === oldId) {
         room.hostId = socket.id;
       }
 
-      // Zaktualizuj turnOrder
       const turnIdx = room.turnOrder.indexOf(oldId);
       if (turnIdx !== -1) {
         room.turnOrder[turnIdx] = socket.id;
       }
 
-      // Zaktualizuj answers i votes
       if (room.answers[oldId] !== undefined) {
         room.answers[socket.id] = room.answers[oldId];
         delete room.answers[oldId];
@@ -356,7 +337,6 @@ io.on("connection", (socket) => {
         reconnected: true,
       });
 
-      // Wyślij rolę ponownie
       if (room.phase !== "lobby" && room.phase !== "ended") {
         if (socket.id === room.impostorId) {
           socket.emit("role", { role: "impostor", hint: room.hint });
@@ -367,22 +347,9 @@ io.on("connection", (socket) => {
 
       emitPlayers(room);
 
-      // Wznów turę jeśli ten gracz ma teraz turę
+      // Wyślij świeży stan tury do całego pokoju
       if (room.phase === "play") {
-        const currentId = room.turnOrder[room.turnIndex];
-        if (currentId === socket.id) {
-          emitTurn(room);
-        } else {
-          // Poinformuj gracza o aktualnym stanie tury
-          const currentPlayer = getPlayer(room, currentId);
-          io.to(socket.id).emit("turnStart", {
-            playerId: currentId,
-            playerName: currentPlayer ? currentPlayer.name : "Gracz",
-            turnNumber: room.turnIndex + 1,
-            total: room.turnOrder.length,
-            round: room.round,
-          });
-        }
+        emitTurn(room);
       } else if (room.phase === "vote") {
         io.to(socket.id).emit("voteStart", {
           round: room.round,
@@ -520,7 +487,6 @@ io.on("connection", (socket) => {
       const player = room.players.find((p) => p.id === socket.id);
       if (!player) continue;
 
-      // Podczas aktywnej gry — daj 10 sekund na reconnect zamiast od razu usuwać
       if (room.phase === "play" || room.phase === "vote") {
         const timerKey = `${room.code}:${player.name.toLowerCase()}`;
 
@@ -529,16 +495,13 @@ io.on("connection", (socket) => {
         disconnectTimers[timerKey] = setTimeout(() => {
           delete disconnectTimers[timerKey];
 
-          // Sprawdź czy gracz wrócił (id się zmieniło)
           const stillInRoom = room.players.find(
             (p) => p.name.toLowerCase() === player.name.toLowerCase()
           );
           if (!stillInRoom || stillInRoom.id !== socket.id) {
-            // Gracz wrócił z nowym id — nic nie rób
             return;
           }
 
-          // Gracz nie wrócił — usuń go
           const index = room.players.findIndex((p) => p.id === socket.id);
           if (index !== -1) {
             room.players.splice(index, 1);
@@ -563,7 +526,6 @@ io.on("connection", (socket) => {
         continue;
       }
 
-      // W lobby lub po zakończeniu gry — usuń natychmiast
       const index = room.players.findIndex((p) => p.id === socket.id);
       if (index !== -1) {
         room.players.splice(index, 1);
