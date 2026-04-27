@@ -110,6 +110,20 @@
       color: #94a3b8;
       margin-bottom: 10px;
     }
+
+    .msg-system {
+      color: #ef4444;
+      font-weight: 700;
+    }
+
+    .msg-player {
+      color: #ffffff;
+    }
+
+    .msg-player .name {
+      color: #ffffff;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -166,6 +180,7 @@
     let myRole = null;
     let currentRound = 0;
     let currentTurnPlayerId = null;
+    let currentPhase = "lobby";
 
     const lobbyPanel = document.getElementById("lobbyPanel");
     const roomPanel = document.getElementById("roomPanel");
@@ -183,6 +198,7 @@
 
     function appendChat(text, system = false) {
       const li = document.createElement("li");
+      li.className = system ? "msg-system" : "msg-player";
       li.textContent = system ? `• ${text}` : text;
       chatList.appendChild(li);
 
@@ -204,8 +220,16 @@
       });
     }
 
+    function refreshStartButton(phase) {
+      const isHost = socket.id === hostId;
+      const canShow = isHost && (phase === "lobby" || phase === "ended");
+
+      startBtn.classList.toggle("hidden", !canShow);
+      startBtn.textContent = phase === "ended" ? "Start nowej gry" : "Start gry";
+    }
+
     function setMessageState() {
-      const canWrite = currentTurnPlayerId === socket.id && votePanel.classList.contains("hidden") === true;
+      const canWrite = currentPhase === "play" && currentTurnPlayerId === socket.id;
       messageInput.disabled = !canWrite;
     }
 
@@ -214,11 +238,6 @@
       lobbyPanel.classList.add("hidden");
       roomPanel.classList.remove("hidden");
       roomCodeLabel.textContent = `Pokój: ${code}`;
-    }
-
-    function refreshStartButton(phase) {
-      const isHost = socket.id === hostId;
-      startBtn.classList.toggle("hidden", !(isHost && phase === "lobby"));
     }
 
     function sendMessage() {
@@ -259,16 +278,17 @@
     socket.on("roomJoined", ({ code, hostId: newHostId }) => {
       hostId = newHostId;
       showRoom(code);
-      refreshStartButton("lobby");
+      refreshStartButton(currentPhase);
     });
 
     socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round }) => {
       hostId = newHostId;
+      currentPhase = phase || currentPhase;
       currentRound = round || currentRound || 0;
 
       roundLabel.textContent = `Runda: ${currentRound || "—"}`;
       renderPlayers(players);
-      refreshStartButton(phase);
+      refreshStartButton(currentPhase);
       setMessageState();
     });
 
@@ -283,14 +303,18 @@
     });
 
     socket.on("roundStart", ({ round }) => {
+      currentPhase = "play";
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
       votePanel.classList.add("hidden");
       voteButtons.innerHTML = "";
       voteInfo.textContent = "";
+      refreshStartButton(currentPhase);
+      setMessageState();
     });
 
     socket.on("turnStart", ({ playerId, playerName, turnNumber, total, round }) => {
+      currentPhase = "play";
       currentTurnPlayerId = playerId;
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
@@ -306,6 +330,7 @@
     });
 
     socket.on("gameReset", () => {
+      currentPhase = "play";
       clearChat();
       votePanel.classList.add("hidden");
       voteButtons.innerHTML = "";
@@ -315,6 +340,7 @@
       currentTurnPlayerId = null;
       messageInput.value = "";
       messageInput.disabled = true;
+      refreshStartButton(currentPhase);
     });
 
     socket.on("message", (data) => {
@@ -327,6 +353,7 @@
     });
 
     socket.on("voteStart", ({ round, players }) => {
+      currentPhase = "vote";
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
 
@@ -362,9 +389,12 @@
         voteInfo.textContent = "";
       });
       voteButtons.appendChild(abstainBtn);
+
+      refreshStartButton(currentPhase);
     });
 
     socket.on("gameEnd", ({ winner, word }) => {
+      currentPhase = "ended";
       votePanel.classList.add("hidden");
       voteButtons.innerHTML = "";
       voteInfo.textContent = "";
@@ -377,6 +407,8 @@
       } else {
         appendChat(`Gra zakończona. Wygrywa impostor. Hasło: ${word}`, true);
       }
+
+      refreshStartButton(currentPhase);
     });
 
     socket.on("errorMessage", (msg) => {
