@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Impostor Game</title>
+</head>
+<body>
+
+<h2>Gra online</h2>
+
+<input id="name" placeholder="Twoje imię" />
+<button onclick="createRoom()">Stwórz pokój</button>
+
+<br><br>
+
+<input id="room" placeholder="Kod pokoju" />
+<button onclick="joinRoom()">Dołącz</button>
+
+<hr>
+
+<h3>Gracze:</h3>
+<ul id="players"></ul>
+
+<h3>Chat:</h3>
+<div id="chat"></div>
+
+<input id="msg" placeholder="wiadomość" />
+<button onclick="send()">Wyślij</button>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>
+const socket = io("http://localhost:3000");
+
+let currentRoom = "";
+let myName = "";
+
+function createRoom() {
+  myName = document.getElementById("name").value;
+
+  socket.emit("createRoom", myName, (res) => {
+    currentRoom = res.roomCode;
+    alert("Kod pokoju: " + currentRoom);
+    updatePlayers(res.players);
+  });
+}
+
+function joinRoom() {
+  myName = document.getElementById("name").value;
+  const roomCode = document.getElementById("room").value;
+
+  socket.emit("joinRoom", { roomCode, name: myName }, (res) => {
+    if (res.error) return alert(res.error);
+
+    currentRoom = roomCode;
+    updatePlayers(res.players);
+  });
+}
+
+function send() {
+  const message = document.getElementById("msg").value;
+
+  socket.emit("message", {
+    roomCode: currentRoom,
+    name: myName,
+    message
+  });
+}
+
+socket.on("updatePlayers", updatePlayers);
+
+socket.on("message", (data) => {
+  document.getElementById("chat").innerHTML +=
+    `<p><b>${data.name}:</b> ${data.message}</p>`;
+});
+
+function updatePlayers(players) {
+  const ul = document.getElementById("players");
+  ul.innerHTML = "";
+
+  players.forEach(p => {
+    const li = document.createElement("li");
+    li.innerText = p.name;
+    ul.appendChild(li);
+  });
+}
+</script>
+
+</body>
+</html>
