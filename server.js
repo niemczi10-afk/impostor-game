@@ -17,6 +17,8 @@ const words = [
   { word: "telefon", hint: "technologia" },
   { word: "plaża", hint: "wakacje" },
   { word: "szkoła", hint: "miejsce" },
+  { word: "kawa", hint: "napój" },
+  { word: "las", hint: "natura" },
 ];
 
 function createRoomCode() {
@@ -27,10 +29,21 @@ function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+function shuffleArray(arr) {
+  const copy = [...arr];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
 function normalizeText(text) {
-  return String(text || "")
-    .trim()
-    .toLowerCase();
+  return String(text || "").trim().toLowerCase();
+}
+
+function getPlayer(room, id) {
+  return room.players.find((p) => p.id === id);
 }
 
 function emitPlayers(room) {
@@ -49,54 +62,189 @@ function emitSystemMessage(room, text) {
   });
 }
 
-function startNewRound(room, keepSameRoles = true) {
+function emitTurn(room) {
+  const currentId = room.turnOrder[room.turnIndex];
+
+  if (!currentId) {
+    startVotePhase(room);
+    return;
+  }
+
+  const currentPlayer = getPlayer(room, currentId);
+
+  io.to(room.code).emit("turnStart", {
+    playerId: currentId,
+    playerName: currentPlayer ? currentPlayer.name : "Gracz",
+    turnNumber: room.turnIndex + 1,
+    total: room.turnOrder.length,
+    round: room.round,
+  });
+}
+
+function beginRound(room) {
   room.phase = "play";
   room.answers = {};
   room.votes = {};
-
-  if (!keepSameRoles || !room.word || !room.hint || !room.impostorId) {
-    const chosen = pickRandom(words);
-    room.word = chosen.word;
-    room.hint = chosen.hint;
-
-    const impostor = pickRandom(room.players);
-    room.impostorId = impostor.id;
-
-    room.players.forEach((p) => {
-      if (p.id === room.impostorId) {
-        io.to(p.id).emit("role", {
-          role: "impostor",
-          hint: room.hint,
-        });
-      } else {
-        io.to(p.id).emit("role", {
-          role: "crewmate",
-          word: room.word,
-        });
-      }
-    });
-  }
+  room.turnOrder = shuffleArray(room.players.map((p) => p.id));
+  room.turnIndex = 0;
 
   io.to(room.code).emit("roundStart", {
     round: room.round,
   });
 
-  emitSystemMessage(room, `Runda ${room.round} — wpisz jedno słowo, odpowiedź albo skojarzenie.`);
+  emitSystemMessage(room, `Runda ${room.round}`);
+  emitTurn(room);
+}
+
+function startVotePhase(room) {
+  room.phase = "vote";
+  room.votes = {};
+
+  io.to(room.code).emit("voteStart", {
+    round: room.round,
+    players: room.players,
+  });
+
+  emitSystemMessage(room, "Czas na głosowanie.");
 }
 
 function endGame(room, winner) {
   room.phase = "ended";
+
   io.to(room.code).emit("gameEnd", {
     winner,
     word: room.word,
   });
 }
 
+function startNewGame(room) {
+  room.phase = "play";
+  room.round = 1;
+  room.answers = {};
+  room.votes = {};
+
+  const chosen = pickRandom(words);
+  room.word = chosen.word;
+  room.hint = chosen.hint;
+
+  const impostor = pickRandom(room.players);
+  room.impostorId = impostor.id;
+
+  io.to(room.code).emit("gameReset");
+
+  room.players.forEach((p) => {
+    if (p.id === room.impostorId) {
+      io.to(p.id).emit("role", {
+        role: "impostor",
+        hint: room.hint,
+      });
+    } else {
+      io.to(p.id).emit("role", {
+        role: "crewmate",
+        word: room.word,
+      });
+    }
+  });
+
+  emitSystemMessage(room, "Nowa gra rozpoczęta.");
+  beginRound(room);
+}
+
+function resolveVote(room) {
+  const counts = {};
+
+  for (const player of room.players) {
+    const votedFor = room.votes[player.id];
+
+    if (!votedFor) continue;
+    if (!room.players.some((p) => p.id === votedFor)) continue;
+
+    counts[votedFor] = (counts[votedFor] || 0) + 1;
+  }
+
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) {
+    emitSystemMessage(room, "Wszyscy się wstrzymali. Rozpoczyna się kolejna runda.");
+    room.round += 1;
+    beginRound(room);
+    return;
+  }
+
+  const [topId, topVotes] = entries[0];
+  const tied = entries.filter(([, votes]) => votes === topVotes).length > 1;
+
+  if (tied) {
+    emitSystemMessage(room, "Brak jednoznacznego wyniku. Rozpoczyna się kolejna runda.");
+    room.round += 1;
+    beginRound(room);
+    return;
+  }
+
+  const votedPlayer = getPlayer(room, topId);
+
+  if (!votedPlayer) {
+    emitSystemMessage(room, "Błąd głosowania. Rozpoczyna się kolejna runda.");
+    room.round += 1;
+    beginRound(room);
+    return;
+  }
+
+  if (topId === room.impostorId) {
+    emitSystemMessage(room, `${votedPlayer.name} został wybrany. Crewmates wygrywają.`);
+    endGame(room, "crewmates");
+    return;
+  }
+
+  emitSystemMessage(room, `${votedPlayer.name} został wyeliminowany. Impostor wygrywa.`);
+  endGame(room, "impostor");
+}
+
+function removePlayerFromActiveRound(room, playerId) {
+  if (room.phase === "play") {
+    const removedIndex = room.turnOrder.indexOf(playerId);
+    const currentId = room.turnOrder[room.turnIndex];
+
+    if (removedIndex !== -1) {
+      room.turnOrder.splice(removedIndex, 1);
+
+      if (removedIndex < room.turnIndex) {
+        room.turnIndex -= 1;
+      }
+
+      if (playerId === currentId) {
+        if (room.turnIndex >= room.turnOrder.length) {
+          startVotePhase(room);
+        } else {
+          emitTurn(room);
+        }
+      }
+    }
+
+    if (room.turnOrder.length === 0) {
+      startVotePhase(room);
+    }
+  }
+
+  if (room.phase === "vote") {
+    delete room.votes[playerId];
+
+    const allVotesIn = room.players.every((p) =>
+      Object.prototype.hasOwnProperty.call(room.votes, p.id)
+    );
+
+    if (allVotesIn) {
+      resolveVote(room);
+    }
+  }
+}
+
 io.on("connection", (socket) => {
   socket.on("createRoom", ({ name }) => {
     const playerName = String(name || "").trim();
+
     if (!playerName) {
-      socket.emit("errorMessage", "Podaj swoje imię.");
+      socket.emit("errorMessage", "Podaj swój nick.");
       return;
     }
 
@@ -113,6 +261,8 @@ io.on("connection", (socket) => {
       impostorId: null,
       answers: {},
       votes: {},
+      turnOrder: [],
+      turnIndex: 0,
     };
 
     socket.join(code);
@@ -130,7 +280,7 @@ io.on("connection", (socket) => {
     const room = rooms[roomCode];
 
     if (!playerName) {
-      socket.emit("errorMessage", "Podaj swoje imię.");
+      socket.emit("errorMessage", "Podaj swój nick.");
       return;
     }
 
@@ -184,41 +334,7 @@ io.on("connection", (socket) => {
       return;
     }
 
-    room.phase = "play";
-    room.round = 1;
-    room.answers = {};
-    room.votes = {};
-
-    const chosen = pickRandom(words);
-    room.word = chosen.word;
-    room.hint = chosen.hint;
-
-    const impostor = pickRandom(room.players);
-    room.impostorId = impostor.id;
-
-    io.to(room.code).emit("gameReset");
-
-    room.players.forEach((p) => {
-      if (p.id === room.impostorId) {
-        io.to(p.id).emit("role", {
-          role: "impostor",
-          hint: room.hint,
-        });
-      } else {
-        io.to(p.id).emit("role", {
-          role: "crewmate",
-          word: room.word,
-        });
-      }
-    });
-
-    io.to(room.code).emit("roundStart", {
-      round: room.round,
-    });
-
-    emitSystemMessage(room, "Nowa gra rozpoczęta.");
-    emitSystemMessage(room, "Runda 1 — wpisz jedno słowo, odpowiedź albo skojarzenie.");
-
+    startNewGame(room);
     emitPlayers(room);
   });
 
@@ -229,9 +345,19 @@ io.on("connection", (socket) => {
 
     if (!room || !msg) return;
     if (room.phase !== "play") return;
-    if (room.answers[socket.id]) return;
 
-    const sender = room.players.find((p) => p.id === socket.id);
+    const currentId = room.turnOrder[room.turnIndex];
+    if (socket.id !== currentId) {
+      socket.emit("errorMessage", "Nie twoja tura.");
+      return;
+    }
+
+    if (room.answers[socket.id]) {
+      socket.emit("errorMessage", "Już odpowiedziałeś w tej rundzie.");
+      return;
+    }
+
+    const sender = getPlayer(room, socket.id);
 
     room.answers[socket.id] = msg;
 
@@ -250,14 +376,14 @@ io.on("connection", (socket) => {
       return;
     }
 
-    if (Object.keys(room.answers).length === room.players.length) {
-      room.phase = "vote";
-      io.to(room.code).emit("voteStart", {
-        round: room.round,
-        players: room.players,
-      });
-      emitSystemMessage(room, "Czas na głosowanie.");
+    room.turnIndex += 1;
+
+    if (room.turnIndex >= room.turnOrder.length) {
+      startVotePhase(room);
+      return;
     }
+
+    emitTurn(room);
   });
 
   socket.on("vote", ({ code, target }) => {
@@ -269,56 +395,20 @@ io.on("connection", (socket) => {
 
     const voteTarget = target === null || target === "" ? null : String(target);
 
-    // impostor nie może głosować na siebie
+    // Brak możliwości zagłosowania na siebie
     if (voteTarget === socket.id) {
       room.votes[socket.id] = null;
     } else {
       room.votes[socket.id] = voteTarget;
     }
 
-    if (Object.keys(room.votes).length < room.players.length) return;
+    const allVotesIn = room.players.every((p) =>
+      Object.prototype.hasOwnProperty.call(room.votes, p.id)
+    );
 
-    const counts = {};
-    for (const votedId of Object.values(room.votes)) {
-      if (!votedId) continue; // abstencja
-      counts[votedId] = (counts[votedId] || 0) + 1;
+    if (allVotesIn) {
+      resolveVote(room);
     }
-
-    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-
-    if (entries.length === 0) {
-      emitSystemMessage(room, "Brak głosów. Impostor wygrywa.");
-      endGame(room, "impostor");
-      return;
-    }
-
-    const [topId, topVotes] = entries[0];
-    const secondVotes = entries[1] ? entries[1][1] : 0;
-
-    // eliminacja tylko przy jednoznacznym wyniku
-    if (topVotes === secondVotes) {
-      emitSystemMessage(room, "Brak jednoznacznego wyniku. Impostor wygrywa.");
-      endGame(room, "impostor");
-      return;
-    }
-
-    const votedPlayer = room.players.find((p) => p.id === topId);
-
-    if (!votedPlayer) {
-      emitSystemMessage(room, "Błąd głosowania. Impostor wygrywa.");
-      endGame(room, "impostor");
-      return;
-    }
-
-    if (topId === room.impostorId) {
-      emitSystemMessage(room, `${votedPlayer.name} został wybrany. Crewmates wygrywają.`);
-      endGame(room, "crewmates");
-      return;
-    }
-
-    // zły typ wyeliminowany -> impostor wygrywa
-    emitSystemMessage(room, `${votedPlayer.name} został wyeliminowany. Impostor wygrywa.`);
-    endGame(room, "impostor");
   });
 
   socket.on("disconnect", () => {
@@ -331,6 +421,8 @@ io.on("connection", (socket) => {
       if (room.hostId === socket.id) {
         room.hostId = room.players[0]?.id || null;
       }
+
+      removePlayerFromActiveRound(room, socket.id);
 
       if (room.players.length === 0) {
         delete rooms[room.code];
