@@ -220,8 +220,14 @@ function removePlayerFromActiveRound(room, playerId) {
       room.turnIndex -= 1;
     }
 
-    if (room.phase === "play") {
-      const currentId = room.turnOrder[room.turnIndex];
+  if (room.phase === "play") {
+    emitTurn(room);  // emituje do całego pokoju, wszyscy dostają świeży turnStart
+  } else if (room.phase === "vote") {
+    io.to(socket.id).emit("voteStart", {
+      round: room.round,
+      players: room.players,
+    });
+  }
 
       if (!currentId) {
         startVotePhase(room);
