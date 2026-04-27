@@ -121,10 +121,18 @@ io.on("connection", (socket) => {
         winner: "IMPOSTOR",
         word: room.currentWord
       });
-
+    
       room.history.push(room.currentWord);
-
-      return;
+    
+      // 🔥 WYŚLIJ HISTORIĘ
+      io.to(roomCode).emit("history", room.history);
+    
+      // 🔁 NOWA RUNDA PO 2 SEKUNDACH
+      setTimeout(() => {
+        startNewRound(roomCode);
+      }, 2000);
+    
+      return; // 🔥 ZOSTAW TO
     }
 
     // NASTĘPNA TURA
