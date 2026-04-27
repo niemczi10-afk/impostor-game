@@ -22,6 +22,9 @@ const words = [
 io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
+  // =====================
+  // CREATE ROOM
+  // =====================
   socket.on("createRoom", (name, callback) => {
     const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
 
@@ -35,9 +38,19 @@ io.on("connection", (socket) => {
     };
 
     socket.join(roomCode);
-    callback({ roomCode, players: rooms[roomCode].players });
+
+    callback({
+      roomCode,
+      players: rooms[roomCode].players
+    });
+
+    // 🔥 SYNC STANU
+    io.to(socket.id).emit("history", rooms[roomCode].history);
   });
 
+  // =====================
+  // JOIN ROOM
+  // =====================
   socket.on("joinRoom", ({ roomCode, name }, callback) => {
     const room = rooms[roomCode];
     if (!room) return callback?.({ error: "Nie ma takiego pokoju" });
@@ -46,13 +59,27 @@ io.on("connection", (socket) => {
     socket.join(roomCode);
 
     io.to(roomCode).emit("updatePlayers", room.players);
+
     callback?.({ success: true, players: room.players });
+
+    // 🔥 KLUCZOWY FIX: SYNC STANU DLA NOWEGO GRACZA
+    io.to(socket.id).emit("history", room.history);
+
+    if (room.turnOrder.length > 0) {
+      sendTurn(roomCode);
+    }
   });
 
+  // =====================
+  // START GAME
+  // =====================
   socket.on("startGame", (roomCode) => {
     startNewRound(roomCode);
   });
 
+  // =====================
+  // MESSAGE
+  // =====================
   socket.on("message", ({ roomCode, name, message }) => {
     const room = rooms[roomCode];
     if (!room) return;
@@ -74,7 +101,6 @@ io.on("connection", (socket) => {
       });
 
       room.history.push(room.currentWord);
-      console.log("HISTORIA:", room.history);
 
       io.to(roomCode).emit("history", room.history);
 
@@ -86,6 +112,7 @@ io.on("connection", (socket) => {
     }
 
     room.turnIndex++;
+
     if (room.turnIndex >= room.turnOrder.length) {
       room.turnIndex = 0;
     }
@@ -93,6 +120,9 @@ io.on("connection", (socket) => {
     sendTurn(roomCode);
   });
 
+  // =====================
+  // DISCONNECT
+  // =====================
   socket.on("disconnect", () => {
     for (const roomCode in rooms) {
       const room = rooms[roomCode];
@@ -104,14 +134,18 @@ io.on("connection", (socket) => {
         delete rooms[roomCode];
       } else {
         io.to(roomCode).emit("updatePlayers", room.players);
+
+        // 🔥 FIX SYNC PO DISCONNECT
+        sendTurn(roomCode);
       }
     }
   });
 });
 
 
-// 🔥 FUNKCJE POMOCNICZE
-
+// =====================
+// START NEW ROUND
+// =====================
 function startNewRound(roomCode) {
   const room = rooms[roomCode];
   if (!room) return;
@@ -146,9 +180,14 @@ function startNewRound(roomCode) {
 
   sendTurn(roomCode);
 
+  // 🔥 HISTORY ALWAYS SYNC
   io.to(roomCode).emit("history", room.history);
 }
 
+
+// =====================
+// TURN SYNC (FIXED)
+// =====================
 function sendTurn(roomCode) {
   const room = rooms[roomCode];
   if (!room) return;
@@ -163,7 +202,7 @@ function sendTurn(roomCode) {
 }
 
 
-// PORT
+// =====================
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
