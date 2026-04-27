@@ -32,7 +32,35 @@
     h1, h2, h3 {
       margin-top: 0;
     }
-
+    /* AKTYWNA TURA */
+    .turn-active {
+      font-weight: bold;
+      position: relative;
+    }
+    
+    /* TWOJA TURA (zielona + puls) */
+    .turn-you {
+      color: #22c55e;
+      animation: pulseYou 0.9s infinite;
+    }
+    
+    /* CZYJAŚ TURA (żółta) */
+    .turn-other {
+      color: #facc15;
+    }
+    
+    /* STRZAŁKA */
+    .turn-arrow::before {
+      content: "➡️ ";
+      margin-right: 4px;
+    }
+    
+    /* ANIMACJA */
+    @keyframes pulseYou {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+      100% { transform: scale(1); }
+    }
     input, button {
       width: 100%;
       box-sizing: border-box;
