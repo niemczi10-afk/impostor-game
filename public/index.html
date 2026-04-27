@@ -43,6 +43,16 @@ function createRoom() {
   });
 }
 
+socket.on("role", (data) => {
+  if (data.role === "IMPOSTOR") {
+    document.getElementById("role").innerText =
+      "IMPOSTOR - podpowiedź: " + data.hint;
+  } else {
+    document.getElementById("role").innerText =
+      "CREWMATE - słowo: " + data.word;
+  }
+});
+  
 function joinRoom() {
   myName = document.getElementById("name").value;
   const roomCode = document.getElementById("room").value;
