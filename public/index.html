@@ -41,6 +41,7 @@
       background: #3b82f6;
       color: white;
       cursor: pointer;
+      margin-top: 5px;
     }
 
     button:hover {
@@ -60,10 +61,15 @@
       background: #1f2937;
       margin: 5px 0;
       border-radius: 6px;
+      cursor: pointer;
+    }
+
+    #players li:hover {
+      background: #374151;
     }
 
     #chat {
-      height: 500px;
+      height: 400px;
       overflow-y: auto;
       background: #111827;
       padding: 10px;
@@ -71,42 +77,33 @@
     }
 
     .role {
-      font-size: 18px;
-      margin-top: 10px;
+      font-size: 16px;
       color: #fbbf24;
     }
 
     .turn {
-      margin-top: 10px;
       color: #22c55e;
+      margin-top: 5px;
     }
 
-    .round-line {
+    .phase {
+      color: #60a5fa;
+      margin-top: 5px;
+    }
+
+    .voteBox {
+      display: none;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .redLine {
       text-align: center;
       color: #ef4444;
       font-weight: bold;
       margin: 10px 0;
-    }
-
-    .line {
-      height: 2px;
-      background: #ef4444;
-      margin: 5px 0 10px 0;
-    }
-
-    .disabled {
-      opacity: 0.5;
-      pointer-events: none;
-    }
-
-    #startBtn {
-      display: none;
-      margin-top: 10px;
-    }
-
-    #roomCodeDisplay {
-      color: #60a5fa;
-      font-weight: bold;
     }
   </style>
 </head>
@@ -120,26 +117,29 @@
 
     <h2>🎮 Impostor</h2>
 
-    <input id="name" placeholder="Twoje imię">
+    <input id="name" placeholder="Nick">
     <button onclick="createRoom()">Stwórz pokój</button>
 
     <input id="room" placeholder="Kod pokoju">
     <button onclick="joinRoom()">Dołącz</button>
 
+    <button id="startBtn" onclick="startGame()" style="display:none;">
+      Start (HOST)
+    </button>
+
     <div class="card">
-      <h3>🔑 Kod pokoju</h3>
-      <div id="roomCodeDisplay">---</div>
+      <h3>Kod pokoju</h3>
+      <div id="roomCode">---</div>
     </div>
 
-    <button id="startBtn" onclick="startGame()">Start gry (HOST)</button>
-
     <div class="card">
-      <h3>👥 Gracze</h3>
+      <h3>Gracze</h3>
       <ul id="players"></ul>
     </div>
 
     <div class="card">
       <div class="role" id="role">Czekanie...</div>
+      <div class="phase" id="phase">---</div>
       <div class="turn" id="turn">---</div>
     </div>
 
@@ -149,12 +149,18 @@
   <div class="game">
 
     <div class="card">
-      <h3>💬 Gra</h3>
+      <h3>Czat</h3>
       <div id="chat"></div>
     </div>
 
-    <input id="msg" placeholder="Twoje słowo..." />
-    <button id="sendBtn" onclick="send()">Wyślij</button>
+    <input id="msg" placeholder="Twoja odpowiedź / słowo">
+    <button onclick="send()">Wyślij</button>
+
+    <!-- VOTE -->
+    <div class="card voteBox" id="voteBox">
+      <h3>🗳 GŁOSOWANIE</h3>
+      <ul id="voteList"></ul>
+    </div>
 
   </div>
 
@@ -166,18 +172,17 @@
 
 const socket = io("https://impostor-game-tf4k.onrender.com");
 
+let myId = null;
 let currentRoom = "";
 let myName = "";
-let myId = null;
-let currentTurnId = null;
-let hostId = null;
+let hostId = "";
+let canVote = false;
 
-/* CONNECT */
 socket.on("connect", () => {
   myId = socket.id;
 });
 
-/* CREATE ROOM */
+/* CREATE */
 function createRoom() {
   myName = document.getElementById("name").value;
 
@@ -185,36 +190,28 @@ function createRoom() {
     currentRoom = res.roomCode;
     hostId = res.hostId;
 
-    document.getElementById("roomCodeDisplay").innerText =
-      "Kod: " + currentRoom;
+    document.getElementById("roomCode").innerText = currentRoom;
 
-    updatePlayers(res.players);
-
-    if (hostId === myId) {
+    if (myId === hostId) {
       document.getElementById("startBtn").style.display = "block";
     }
-
-    resetUI();
   });
 }
 
-/* JOIN ROOM */
+/* JOIN */
 function joinRoom() {
   myName = document.getElementById("name").value;
   const code = document.getElementById("room").value;
 
   socket.emit("joinRoom", { roomCode: code, name: myName }, (res) => {
-    if (res.error) return alert(res.error);
-
     currentRoom = code;
     hostId = res.hostId;
 
-    document.getElementById("roomCodeDisplay").innerText =
-      "Kod: " + currentRoom;
+    document.getElementById("roomCode").innerText = currentRoom;
 
-    updatePlayers(res.players);
-
-    resetUI();
+    if (myId === hostId) {
+      document.getElementById("startBtn").style.display = "block";
+    }
   });
 }
 
@@ -225,8 +222,6 @@ function startGame() {
 
 /* SEND */
 function send() {
-  if (myId !== currentTurnId) return;
-
   const msg = document.getElementById("msg").value;
 
   socket.emit("message", {
@@ -238,66 +233,66 @@ function send() {
   document.getElementById("msg").value = "";
 }
 
-/* EVENTS */
+/* ROLE */
+socket.on("role", (data) => {
+  document.getElementById("role").innerText =
+    data.role === "IMPOSTOR"
+      ? "🕵️ IMPOSTOR | " + data.hint
+      : "👨‍🚀 CREWMATE | " + data.word;
+});
 
+/* ROUND */
+socket.on("roundStart", (data) => {
+  document.getElementById("chat").innerHTML += `
+    <div class="redLine">━━━━━━━━━━ Runda ${data.round} ━━━━━━━━━━</div>
+  `;
+});
+
+/* PHASE CHANGE */
+socket.on("voteStart", (data) => {
+  document.getElementById("phase").innerText = "FAZA: GŁOSOWANIE";
+
+  document.getElementById("voteBox").style.display = "block";
+
+  const list = document.getElementById("voteList");
+  list.innerHTML = "";
+
+  data.players.forEach(p => {
+    const li = document.createElement("li");
+    li.innerText = p.name;
+
+    li.onclick = () => {
+      socket.emit("vote", {
+        roomCode: currentRoom,
+        targetId: p.id
+      });
+
+      document.getElementById("voteBox").style.display = "none";
+    };
+
+    list.appendChild(li);
+  });
+});
+
+/* TURN / PLAY */
 socket.on("message", (data) => {
   document.getElementById("chat").innerHTML +=
     `<p><b>${data.name}:</b> ${data.message}</p>`;
 });
 
-socket.on("role", (data) => {
-  if (data.role === "IMPOSTOR") {
-    document.getElementById("role").innerText =
-      "🕵️ IMPOSTOR | Podpowiedź: " + data.hint;
-  } else {
-    document.getElementById("role").innerText =
-      "👨‍🚀 CREWMATE | Słowo: " + data.word;
-  }
-});
-
-/* TURN */
+/* TURN INFO */
 socket.on("turn", (data) => {
-  currentTurnId = data.playerId;
-
-  if (currentTurnId === myId) {
-    document.getElementById("turn").innerText = "👉 TWOJA TURA";
-    enableInput(true);
-  } else {
-    document.getElementById("turn").innerText =
-      "Tura gracza: " + data.playerName;
-    enableInput(false);
-  }
+  document.getElementById("turn").innerText =
+    "Tura: " + data.playerName;
 });
 
-/* RUNDY */
-socket.on("roundStart", (data) => {
-  const chat = document.getElementById("chat");
-
-  chat.innerHTML += `
-    <div class="round-line">Runda ${data.round}</div>
-    <div class="line"></div>
-  `;
-
-  chat.scrollTop = chat.scrollHeight;
+/* GAME END */
+socket.on("gameEnd", (data) => {
+  alert("Wynik: " + data.winner + "\nSłowo: " + data.word);
 });
 
-/* HELPERS */
-function enableInput(state) {
-  const input = document.getElementById("msg");
-  const btn = document.getElementById("sendBtn");
-
-  input.disabled = !state;
-  btn.style.opacity = state ? "1" : "0.5";
-}
-
-function resetUI() {
-  document.getElementById("chat").innerHTML = "";
-  document.getElementById("role").innerText = "Czekanie...";
-  document.getElementById("turn").innerText = "---";
-  enableInput(false);
-}
-
-function updatePlayers(players) {
+/* PLAYERS */
+socket.on("updatePlayers", (players) => {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
 
@@ -306,7 +301,7 @@ function updatePlayers(players) {
     li.innerText = p.name;
     ul.appendChild(li);
   });
-}
+});
 
 </script>
 
