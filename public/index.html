@@ -468,9 +468,9 @@
     socket.on("role", (data) => {
       myRole = data.role;
       if (data.role === "impostor") {
-        roleLabel.textContent = `Twoja rola: IMPOSTOR. Podpowiedź: ${data.hint}`;
+        roleLabel.innerHTML = `Twoja rola: <strong style="color:#ef4444">IMPOSTOR</strong>. Podpowiedź: <strong style="color:#ffffff">${data.hint}</strong>`;
       } else {
-        roleLabel.textContent = `Twoja rola: CREWMATE. Słowo: ${data.word}`;
+        roleLabel.innerHTML = `Twoja rola: <strong style="color:#22c55e">CREWMATE</strong>. Słowo: <strong style="color:#ffffff">${data.word}</strong>`;
       }
     });
 
