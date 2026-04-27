@@ -4,9 +4,7 @@ const { Server } = require("socket.io");
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: "*" }
-});
+const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(express.static("public"));
 
@@ -15,8 +13,8 @@ const rooms = {};
 const words = [
   { word: "banan", hint: "żółty owoc" },
   { word: "samochód", hint: "pojazd na kołach" },
-  { word: "pies", hint: "szczeka i ma ogon" },
-  { word: "szkoła", hint: "uczą się tam dzieci" }
+  { word: "pies", hint: "szczeka" },
+  { word: "szkoła", hint: "uczą się dzieci" }
 ];
 
 io.on("connection", (socket) => {
@@ -25,41 +23,42 @@ io.on("connection", (socket) => {
   // =====================
   // CREATE ROOM
   // =====================
-  socket.on("createRoom", (name, callback) => {
-    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+  socket.on("createRoom", (name, cb) => {
+    const code = Math.random().toString(36).substring(2, 6).toUpperCase();
 
-    rooms[roomCode] = {
+    rooms[code] = {
       hostId: socket.id,
       players: [{ id: socket.id, name }],
-      turnIndex: 0,
-      turnOrder: [],
-      currentWord: "",
+      phase: "PLAY",
+      round: 0,
       impostorId: null,
-      round: 0
+      word: "",
+      answers: {},
+      votes: {}
     };
 
-    socket.join(roomCode);
+    socket.join(code);
 
-    callback({
-      roomCode,
-      players: rooms[roomCode].players,
+    cb({
+      roomCode: code,
+      players: rooms[code].players,
       hostId: socket.id
     });
   });
 
   // =====================
-  // JOIN ROOM
+  // JOIN
   // =====================
-  socket.on("joinRoom", ({ roomCode, name }, callback) => {
+  socket.on("joinRoom", ({ roomCode, name }, cb) => {
     const room = rooms[roomCode];
-    if (!room) return callback?.({ error: "Nie ma takiego pokoju" });
+    if (!room) return cb?.({ error: "brak pokoju" });
 
     room.players.push({ id: socket.id, name });
     socket.join(roomCode);
 
     io.to(roomCode).emit("updatePlayers", room.players);
 
-    callback?.({
+    cb?.({
       success: true,
       players: room.players,
       hostId: room.hostId
@@ -67,141 +66,166 @@ io.on("connection", (socket) => {
   });
 
   // =====================
-  // START GAME (HOST ONLY)
+  // START GAME
   // =====================
   socket.on("startGame", (roomCode) => {
     const room = rooms[roomCode];
-    if (!room) return;
+    if (!room || socket.id !== room.hostId) return;
 
-    if (socket.id !== room.hostId) return;
-
-    startNewRound(roomCode);
+    startGame(roomCode);
   });
 
   // =====================
-  // MESSAGE
+  // ANSWERS (RUNDA)
   // =====================
-  socket.on("message", ({ roomCode, name, message }) => {
+  socket.on("message", ({ roomCode, message, name }) => {
     const room = rooms[roomCode];
-    if (!room) return;
+    if (!room || room.phase !== "PLAY") return;
 
-    const currentId = room.turnOrder[room.turnIndex];
-    if (socket.id !== currentId) return;
+    room.answers[socket.id] = message;
 
     io.to(roomCode).emit("message", { name, message });
 
-    // IMPOSTOR WIN CONDITION
+    // IMPOSOR WIN (ZGADŁ SŁOWO)
     if (
       socket.id === room.impostorId &&
-      message.toLowerCase() === room.currentWord.toLowerCase()
+      message.toLowerCase() === room.word.toLowerCase()
     ) {
       io.to(roomCode).emit("gameEnd", {
         winner: "IMPOSTOR",
-        word: room.currentWord
+        word: room.word
       });
 
-      setTimeout(() => {
-        startNewRound(roomCode);
-      }, 2000);
-
+      setTimeout(() => resetGame(roomCode, "IMPOSTOR"), 2000);
       return;
     }
 
-    // NEXT TURN
-    room.turnIndex++;
-    if (room.turnIndex >= room.turnOrder.length) {
-      room.turnIndex = 0;
+    // CHECK IF ALL ANSWERED
+    if (Object.keys(room.answers).length === room.players.length) {
+      startVoting(roomCode);
+    }
+  });
+
+  // =====================
+  // VOTING
+  // =====================
+  socket.on("vote", ({ roomCode, targetId }) => {
+    const room = rooms[roomCode];
+    if (!room || room.phase !== "VOTE") return;
+
+    room.votes[socket.id] = targetId;
+
+    const votes = Object.values(room.votes);
+
+    const allVoted = votes.length === room.players.length;
+
+    if (!allVoted) return;
+
+    const counts = {};
+
+    votes.forEach(v => {
+      counts[v] = (counts[v] || 0) + 1;
+    });
+
+    const max = Math.max(...Object.values(counts));
+    const candidates = Object.keys(counts).filter(k => counts[k] === max);
+
+    // brak jednogłośności
+    if (candidates.length !== 1) {
+      io.to(roomCode).emit("gameEnd", {
+        winner: "IMPOSTOR",
+        word: room.word
+      });
+
+      setTimeout(() => resetGame(roomCode, "IMPOSTOR"), 2000);
+      return;
     }
 
-    sendTurn(roomCode);
+    const votedId = candidates[0];
+
+    const correct = votedId === room.impostorId;
+
+    io.to(roomCode).emit("gameEnd", {
+      winner: correct ? "CREWMATES" : "IMPOSTOR",
+      word: room.word
+    });
+
+    setTimeout(() => resetGame(roomCode, correct ? "CREWMATES" : "IMPOSTOR"), 2000);
   });
 
   // =====================
   // DISCONNECT
   // =====================
   socket.on("disconnect", () => {
-    for (const roomCode in rooms) {
-      const room = rooms[roomCode];
-      if (!room) continue;
-
-      room.players = room.players.filter(p => p.id !== socket.id);
-
-      if (room.players.length === 0) {
-        delete rooms[roomCode];
-      } else {
-        io.to(roomCode).emit("updatePlayers", room.players);
-        sendTurn(roomCode);
-      }
+    for (const code in rooms) {
+      const r = rooms[code];
+      r.players = r.players.filter(p => p.id !== socket.id);
+      io.to(code).emit("updatePlayers", r.players);
     }
   });
 });
 
 
 // =====================
-// NEW ROUND
+// START GAME
 // =====================
-function startNewRound(roomCode) {
-  const room = rooms[roomCode];
-  if (!room) return;
+function startGame(code) {
+  const room = rooms[code];
 
-  if (room.players.length < 3 || room.players.length > 6) return;
+  const w = words[Math.floor(Math.random() * words.length)];
 
-  const randomWord = words[Math.floor(Math.random() * words.length)];
-  room.currentWord = randomWord.word;
+  room.word = w.word;
+  room.phase = "PLAY";
+  room.answers = {};
+  room.votes = {};
 
-  const impostorIndex = Math.floor(Math.random() * room.players.length);
-  room.impostorId = room.players[impostorIndex].id;
+  room.round++;
 
-  room.turnOrder = [...room.players]
-    .sort(() => Math.random() - 0.5)
-    .map(p => p.id);
+  const impostor = room.players[Math.floor(Math.random() * room.players.length)];
+  room.impostorId = impostor.id;
 
-  room.turnIndex = 0;
-  room.round = (room.round || 0) + 1;
-
-  // ROLE SEND
-  room.players.forEach((p) => {
-    if (p.id === room.impostorId) {
-      io.to(p.id).emit("role", {
-        role: "IMPOSTOR",
-        hint: randomWord.hint
-      });
-    } else {
-      io.to(p.id).emit("role", {
-        role: "CREWMATE",
-        word: randomWord.word
-      });
-    }
+  room.players.forEach(p => {
+    io.to(p.id).emit("role", {
+      role: p.id === room.impostorId ? "IMPOSTOR" : "CREWMATE",
+      hint: w.hint,
+      word: w.word
+    });
   });
 
-  io.to(roomCode).emit("roundStart", {
-    round: room.round
-  });
-
-  sendTurn(roomCode);
+  io.to(code).emit("roundStart", { round: room.round });
 }
 
 
 // =====================
-// TURN SYNC
+// VOTING PHASE
 // =====================
-function sendTurn(roomCode) {
-  const room = rooms[roomCode];
+function startVoting(code) {
+  const room = rooms[code];
   if (!room) return;
 
-  const currentId = room.turnOrder[room.turnIndex];
-  const player = room.players.find(p => p.id === currentId);
+  room.phase = "VOTE";
+  room.votes = {};
 
-  io.to(roomCode).emit("turn", {
-    playerId: currentId,
-    playerName: player?.name || "?"
+  io.to(code).emit("voteStart", {
+    players: room.players
   });
 }
 
 
 // =====================
-const PORT = process.env.PORT || 3000;
+// RESET GAME
+// =====================
+function resetGame(code, result) {
+  const room = rooms[code];
+  if (!room) return;
 
-server.listen(PORT, () => {
-  console.log("Serwer działa");
-});
+  room.phase = "PLAY";
+  room.answers = {};
+  room.votes = {};
+
+  startGame(code);
+}
+
+
+// =====================
+server.listen(3000, () => console.log("OK"));
