@@ -50,6 +50,13 @@ io.on("connection", (socket) => {
     io.to(roomCode).emit("message", { name, message });
   });
 
+  const words = [
+    { word: "banan", hint: "żółty owoc" },
+    { word: "samochód", hint: "pojazd na kołach" },
+    { word: "pies", hint: "szczeka i ma ogon" },
+    { word: "szkoła", hint: "uczą się tam dzieci" }
+  ];
+  
   // DISCONNECT
   socket.on("disconnect", () => {
     for (const roomCode in rooms) {
