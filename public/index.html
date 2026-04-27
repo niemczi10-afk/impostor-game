@@ -2,259 +2,109 @@
 <html>
 <head>
   <title>Impostor Game</title>
-
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial;
-      background: #0f172a;
-      color: white;
-    }
-
-    .container {
-      display: grid;
-      grid-template-columns: 1fr 2fr;
-      height: 100vh;
-    }
-
-    .panel {
-      padding: 20px;
-      border-right: 1px solid #1f2937;
-    }
-
-    .game {
-      padding: 20px;
-    }
-
-    input {
-      width: 90%;
-      padding: 10px;
-      margin: 5px 0;
-      border-radius: 8px;
-      border: none;
-    }
-
-    button {
-      padding: 10px;
-      border-radius: 8px;
-      border: none;
-      background: #3b82f6;
-      color: white;
-      cursor: pointer;
-      margin-top: 5px;
-    }
-
-    #chat {
-      height: 450px;
-      overflow-y: auto;
-      background: #111827;
-      padding: 10px;
-      border-radius: 10px;
-    }
-
-    #players li {
-      list-style: none;
-      background: #1f2937;
-      margin: 5px 0;
-      padding: 6px;
-      border-radius: 6px;
-    }
-
-    .role {
-      color: #fbbf24;
-    }
-
-    .turn {
-      color: #22c55e;
-    }
-
-    .round {
-      text-align: center;
-      color: #ef4444;
-      font-weight: bold;
-      margin: 10px 0;
-    }
-
-    .voteBox {
-      display: none;
-      background: #111827;
-      padding: 10px;
-      margin-top: 10px;
-      border-radius: 10px;
-    }
-
-    .voteBox li {
-      cursor: pointer;
-      background: #1f2937;
-      margin: 5px 0;
-      padding: 5px;
-      border-radius: 5px;
-    }
-  </style>
 </head>
-
 <body>
 
-<div class="container">
+<h2>Lobby</h2>
 
-  <div class="panel">
+<input id="name" placeholder="Twoje imię" />
+<button onclick="createRoom()">Stwórz pokój</button>
 
-    <h2>Impostor</h2>
+<br><br>
 
-    <input id="name" placeholder="Nick">
-    <button onclick="createRoom()">Create</button>
+<input id="code" placeholder="Kod pokoju" />
+<button onclick="joinRoom()">Dołącz</button>
 
-    <input id="room" placeholder="Room code">
-    <button onclick="joinRoom()">Join</button>
+<h3 id="roomCode"></h3>
 
-    <button id="startBtn" onclick="startGame()" style="display:none;">
-      Start (HOST)
-    </button>
+<ul id="players"></ul>
 
-    <div>
-      <h3>Room</h3>
-      <div id="roomCode">---</div>
-    </div>
+<button id="startBtn" onclick="startGame()" style="display:none">
+START
+</button>
 
-    <h3>Players</h3>
-    <ul id="players"></ul>
+<hr>
 
-    <div class="role" id="role">Waiting...</div>
-    <div class="turn" id="turn"></div>
+<h3 id="role"></h3>
 
-  </div>
+<input id="msg" placeholder="Twoje słowo" />
+<button onclick="sendMsg()">Wyślij</button>
 
-  <div class="game">
+<ul id="chat"></ul>
 
-    <div id="chat"></div>
+<hr>
 
-    <input id="msg">
-    <button onclick="send()">Send</button>
+<h3>Głosowanie</h3>
+<div id="votes"></div>
 
-    <div class="voteBox" id="voteBox">
-      <h3>Vote</h3>
-      <ul id="voteList"></ul>
-    </div>
-
-  </div>
-
-</div>
-
-<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-
+<script src="/socket.io/socket.io.js"></script>
 <script>
+const socket = io();
 
-const socket = io("https://impostor-game-tf4k.onrender.com");
-
-let myId;
-let room = "";
-let host = "";
-
-socket.on("connect", () => myId = socket.id);
+let roomCode = null;
 
 function createRoom() {
   const name = document.getElementById("name").value;
-
-  socket.emit("createRoom", name, (res) => {
-    room = res.roomCode;
-    host = res.hostId;
-
-    document.getElementById("roomCode").innerText = room;
-
-    if (myId === host) {
-      document.getElementById("startBtn").style.display = "block";
-    }
-  });
+  socket.emit("createRoom", name);
 }
 
 function joinRoom() {
   const name = document.getElementById("name").value;
-  const code = document.getElementById("room").value;
-
-  socket.emit("joinRoom", { roomCode: code, name }, (res) => {
-    room = code;
-    host = res.hostId;
-
-    document.getElementById("roomCode").innerText = room;
-
-    if (myId === host) {
-      document.getElementById("startBtn").style.display = "block";
-    }
-  });
+  const code = document.getElementById("code").value;
+  socket.emit("joinRoom", { code, name });
 }
 
-function startGame() {
-  socket.emit("startGame", room);
-}
-
-function send() {
-  const msg = document.getElementById("msg").value;
-
-  socket.emit("message", {
-    roomCode: room,
-    message: msg,
-    name: "player"
-  });
-
-  document.getElementById("msg").value = "";
-}
-
-socket.on("message", d => {
-  document.getElementById("chat").innerHTML +=
-    `<p><b>${d.name}:</b> ${d.message}</p>`;
+socket.on("roomJoined", (code) => {
+  roomCode = code;
+  document.getElementById("roomCode").innerText = "Kod: " + code;
 });
 
-socket.on("roundStart", d => {
-  document.getElementById("chat").innerHTML +=
-    `<div class="round">ROUND ${d.round}</div>`;
-});
-
-socket.on("role", d => {
-  document.getElementById("role").innerText =
-    d.role === "IMPOSTOR"
-      ? "IMPOSTOR: " + d.hint
-      : "CREWMATE: " + d.word;
-});
-
-socket.on("voteStart", d => {
-  const box = document.getElementById("voteBox");
-  const list = document.getElementById("voteList");
-
-  box.style.display = "block";
-  list.innerHTML = "";
-
-  d.players.forEach(p => {
-    const li = document.createElement("li");
-    li.innerText = p.name;
-
-    li.onclick = () => {
-      socket.emit("vote", {
-        roomCode: room,
-        targetId: p.id
-      });
-
-      box.style.display = "none";
-    };
-
-    list.appendChild(li);
-  });
-});
-
-socket.on("gameEnd", d => {
-  alert(d.winner + " wins! Word: " + d.word);
-});
-
-socket.on("updatePlayers", players => {
+socket.on("updatePlayers", (players) => {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
 
-  players.forEach(p => {
+  players.forEach((p) => {
     const li = document.createElement("li");
     li.innerText = p.name;
     ul.appendChild(li);
   });
+
+  document.getElementById("startBtn").style.display = "block";
 });
 
+function startGame() {
+  socket.emit("startGame", roomCode);
+}
+
+socket.on("role", (data) => {
+  if (data.role === "impostor") {
+    document.getElementById("role").innerText =
+      "Jesteś IMPOSTOREM. Hint: " + data.hint;
+  } else {
+    document.getElementById("role").innerText =
+      "Słowo: " + data.word;
+  }
+});
+
+function sendMsg() {
+  const text = document.getElementById("msg").value;
+  socket.emit("message", { code: roomCode, text });
+}
+
+socket.on("message", (msg) => {
+  const li = document.createElement("li");
+  li.innerText = msg.text;
+  document.getElementById("chat").appendChild(li);
+});
+
+socket.on("voteStart", () => {
+  document.getElementById("votes").innerHTML = "Głosowanie!";
+});
+
+socket.on("gameEnd", (data) => {
+  alert("Wygrana: " + data.winner + " | słowo: " + data.word);
+  location.reload();
+});
 </script>
 
 </body>
