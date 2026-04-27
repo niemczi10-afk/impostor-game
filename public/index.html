@@ -5,7 +5,7 @@
 </head>
 <body>
 
-<h2>Gra online</h2>
+<h2>Gra online (Impostor)</h2>
 
 <input id="name" placeholder="Twoje imię" />
 <button onclick="createRoom()">Stwórz pokój</button>
@@ -17,8 +17,14 @@
 
 <hr>
 
+<button onclick="startGame()">Start gry</button>
+
 <h3>Gracze:</h3>
 <ul id="players"></ul>
+
+<h3 id="role"></h3>
+
+<hr>
 
 <h3>Chat:</h3>
 <div id="chat"></div>
@@ -28,11 +34,13 @@
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 <script>
-const socket = io("https://impostor-game-tf4k.onrender.com/");
+
+const socket = io("https://impostor-game-tf4k.onrender.com");
 
 let currentRoom = "";
 let myName = "";
 
+/* CREATE ROOM */
 function createRoom() {
   myName = document.getElementById("name").value;
 
@@ -43,16 +51,7 @@ function createRoom() {
   });
 }
 
-socket.on("role", (data) => {
-  if (data.role === "IMPOSTOR") {
-    document.getElementById("role").innerText =
-      "IMPOSTOR - podpowiedź: " + data.hint;
-  } else {
-    document.getElementById("role").innerText =
-      "CREWMATE - słowo: " + data.word;
-  }
-});
-  
+/* JOIN ROOM */
 function joinRoom() {
   myName = document.getElementById("name").value;
   const roomCode = document.getElementById("room").value;
@@ -65,6 +64,16 @@ function joinRoom() {
   });
 }
 
+/* START GAME */
+function startGame() {
+  socket.emit("startGame", currentRoom, (res) => {
+    if (res?.error) {
+      alert(res.error);
+    }
+  });
+}
+
+/* SEND MESSAGE */
 function send() {
   const message = document.getElementById("msg").value;
 
@@ -75,13 +84,27 @@ function send() {
   });
 }
 
+/* UPDATE PLAYERS */
 socket.on("updatePlayers", updatePlayers);
 
+/* CHAT */
 socket.on("message", (data) => {
   document.getElementById("chat").innerHTML +=
     `<p><b>${data.name}:</b> ${data.message}</p>`;
 });
 
+/* ROLE (IMPOSTOR / CREWMATE) */
+socket.on("role", (data) => {
+  if (data.role === "IMPOSTOR") {
+    document.getElementById("role").innerText =
+      "IMPOSTOR - podpowiedź: " + data.hint;
+  } else {
+    document.getElementById("role").innerText =
+      "CREWMATE - słowo: " + data.word;
+  }
+});
+
+/* PLAYERS LIST */
 function updatePlayers(players) {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
@@ -92,6 +115,7 @@ function updatePlayers(players) {
     ul.appendChild(li);
   });
 }
+
 </script>
 
 </body>
