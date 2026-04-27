@@ -23,7 +23,7 @@ io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
   // =====================
-  // CREATE ROOM (HOST FIX)
+  // CREATE ROOM
   // =====================
   socket.on("createRoom", (name, callback) => {
     const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -35,7 +35,7 @@ io.on("connection", (socket) => {
       turnOrder: [],
       currentWord: "",
       impostorId: null,
-      history: []
+      round: 0
     };
 
     socket.join(roomCode);
@@ -45,8 +45,6 @@ io.on("connection", (socket) => {
       players: rooms[roomCode].players,
       hostId: socket.id
     });
-
-    io.to(socket.id).emit("history", []);
   });
 
   // =====================
@@ -66,12 +64,6 @@ io.on("connection", (socket) => {
       players: room.players,
       hostId: room.hostId
     });
-
-    io.to(socket.id).emit("history", room.history);
-
-    if (room.turnOrder.length > 0) {
-      sendTurn(roomCode);
-    }
   });
 
   // =====================
@@ -94,12 +86,11 @@ io.on("connection", (socket) => {
     if (!room) return;
 
     const currentId = room.turnOrder[room.turnIndex];
-
     if (socket.id !== currentId) return;
 
     io.to(roomCode).emit("message", { name, message });
 
-    // IMPOSTOR WIN
+    // IMPOSTOR WIN CONDITION
     if (
       socket.id === room.impostorId &&
       message.toLowerCase() === room.currentWord.toLowerCase()
@@ -109,10 +100,6 @@ io.on("connection", (socket) => {
         word: room.currentWord
       });
 
-      room.history.push(room.currentWord);
-
-      io.to(roomCode).emit("history", room.history);
-
       setTimeout(() => {
         startNewRound(roomCode);
       }, 2000);
@@ -120,8 +107,8 @@ io.on("connection", (socket) => {
       return;
     }
 
+    // NEXT TURN
     room.turnIndex++;
-
     if (room.turnIndex >= room.turnOrder.length) {
       room.turnIndex = 0;
     }
@@ -151,7 +138,7 @@ io.on("connection", (socket) => {
 
 
 // =====================
-// START NEW ROUND
+// NEW ROUND
 // =====================
 function startNewRound(roomCode) {
   const room = rooms[roomCode];
@@ -170,7 +157,9 @@ function startNewRound(roomCode) {
     .map(p => p.id);
 
   room.turnIndex = 0;
+  room.round = (room.round || 0) + 1;
 
+  // ROLE SEND
   room.players.forEach((p) => {
     if (p.id === room.impostorId) {
       io.to(p.id).emit("role", {
@@ -185,14 +174,16 @@ function startNewRound(roomCode) {
     }
   });
 
-  sendTurn(roomCode);
+  io.to(roomCode).emit("roundStart", {
+    round: room.round
+  });
 
-  io.to(roomCode).emit("history", room.history);
+  sendTurn(roomCode);
 }
 
 
 // =====================
-// TURN
+// TURN SYNC
 // =====================
 function sendTurn(roomCode) {
   const room = rooms[roomCode];
