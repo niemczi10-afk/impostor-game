@@ -92,6 +92,7 @@ function beginRound(room) {
     round: room.round,
   });
 
+  emitPlayers(room);
   emitSystemMessage(room, `Runda ${room.round}`);
   emitTurn(room);
 }
@@ -105,6 +106,7 @@ function startVotePhase(room) {
     players: room.players,
   });
 
+  emitPlayers(room);
   emitSystemMessage(room, "Czas na głosowanie.");
 }
 
@@ -115,6 +117,8 @@ function endGame(room, winner) {
     winner,
     word: room.word,
   });
+
+  emitPlayers(room);
 }
 
 function startNewGame(room) {
@@ -152,10 +156,11 @@ function startNewGame(room) {
 
 function resolveVote(room) {
   const counts = {};
+  const totalPlayers = room.players.length;
+  const majorityThreshold = Math.floor(totalPlayers / 2) + 1;
 
   for (const player of room.players) {
     const votedFor = room.votes[player.id];
-
     if (!votedFor) continue;
     if (!room.players.some((p) => p.id === votedFor)) continue;
 
@@ -172,9 +177,9 @@ function resolveVote(room) {
   }
 
   const [topId, topVotes] = entries[0];
-  const tied = entries.filter(([, votes]) => votes === topVotes).length > 1;
+  const tiedAtTop = entries.filter(([, votes]) => votes === topVotes).length > 1;
 
-  if (tied) {
+  if (tiedAtTop || topVotes < majorityThreshold) {
     emitSystemMessage(room, "Brak jednoznacznego wyniku. Rozpoczyna się kolejna runda.");
     room.round += 1;
     beginRound(room);
@@ -329,6 +334,11 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (room.phase === "play") {
+      socket.emit("errorMessage", "Gra już trwa.");
+      return;
+    }
+
     if (room.players.length < 3) {
       socket.emit("errorMessage", "Do startu potrzeba minimum 3 graczy.");
       return;
@@ -395,7 +405,6 @@ io.on("connection", (socket) => {
 
     const voteTarget = target === null || target === "" ? null : String(target);
 
-    // Brak możliwości zagłosowania na siebie
     if (voteTarget === socket.id) {
       room.votes[socket.id] = null;
     } else {
