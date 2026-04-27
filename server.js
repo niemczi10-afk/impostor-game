@@ -13,7 +13,7 @@ app.use(express.static("public"));
 const rooms = {};
 
 const words = [
-  { word: "banan", hint: "żółty owoc" },
+  { word: "pdf", hint: "bigmen" },
   { word: "samochód", hint: "pojazd na kołach" },
   { word: "pies", hint: "szczeka i ma ogon" },
   { word: "szkoła", hint: "uczą się tam dzieci" }
