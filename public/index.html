@@ -2,37 +2,134 @@
 <html>
 <head>
   <title>Impostor Game</title>
+
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: white;
+    }
+
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      height: 100vh;
+    }
+
+    .panel {
+      padding: 20px;
+      border-right: 1px solid #1f2937;
+    }
+
+    .game {
+      padding: 20px;
+    }
+
+    input {
+      width: 90%;
+      padding: 10px;
+      margin: 5px 0;
+      border-radius: 8px;
+      border: none;
+    }
+
+    button {
+      padding: 10px 15px;
+      margin: 5px 0;
+      border-radius: 8px;
+      border: none;
+      cursor: pointer;
+      background: #3b82f6;
+      color: white;
+    }
+
+    button:hover {
+      background: #2563eb;
+    }
+
+    .card {
+      background: #111827;
+      padding: 10px;
+      border-radius: 10px;
+      margin-top: 10px;
+    }
+
+    #players li {
+      list-style: none;
+      padding: 5px;
+      background: #1f2937;
+      margin: 5px 0;
+      border-radius: 6px;
+    }
+
+    #chat {
+      height: 300px;
+      overflow-y: auto;
+      background: #111827;
+      padding: 10px;
+      border-radius: 10px;
+    }
+
+    .role {
+      font-size: 20px;
+      margin: 10px 0;
+      color: #fbbf24;
+    }
+
+    .topbar {
+      font-size: 22px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+  </style>
 </head>
+
 <body>
 
-<h2>Gra online (Impostor)</h2>
+<div class="container">
 
-<input id="name" placeholder="Twoje imię" />
-<button onclick="createRoom()">Stwórz pokój</button>
+  <!-- LEFT PANEL -->
+  <div class="panel">
 
-<br><br>
+    <div class="topbar">🎮 Impostor Game</div>
 
-<input id="room" placeholder="Kod pokoju" />
-<button onclick="joinRoom()">Dołącz</button>
+    <input id="name" placeholder="Twoje imię" />
+    <button onclick="createRoom()">Stwórz pokój</button>
 
-<hr>
+    <input id="room" placeholder="Kod pokoju" />
+    <button onclick="joinRoom()">Dołącz</button>
 
-<button onclick="startGame()">Start gry</button>
+    <button onclick="startGame()">Start gry</button>
 
-<h3>Gracze:</h3>
-<ul id="players"></ul>
+    <div class="card">
+      <div>👥 Gracze:</div>
+      <ul id="players"></ul>
+    </div>
 
-<h3 id="role"></h3>
+    <div class="card">
+      <div class="role" id="role">Czekanie na grę...</div>
+    </div>
 
-<hr>
+  </div>
 
-<h3>Chat:</h3>
-<div id="chat"></div>
+  <!-- RIGHT PANEL -->
+  <div class="game">
 
-<input id="msg" placeholder="wiadomość" />
-<button onclick="send()">Wyślij</button>
+    <div class="card">
+      <div>💬 Chat</div>
+      <div id="chat"></div>
+    </div>
+
+    <input id="msg" placeholder="napisz wiadomość..." />
+    <button onclick="send()">Wyślij</button>
+
+  </div>
+
+</div>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+
 <script>
 
 const socket = io("https://impostor-game-tf4k.onrender.com");
@@ -40,7 +137,7 @@ const socket = io("https://impostor-game-tf4k.onrender.com");
 let currentRoom = "";
 let myName = "";
 
-/* CREATE ROOM */
+/* ROOM */
 function createRoom() {
   myName = document.getElementById("name").value;
 
@@ -51,7 +148,6 @@ function createRoom() {
   });
 }
 
-/* JOIN ROOM */
 function joinRoom() {
   myName = document.getElementById("name").value;
   const roomCode = document.getElementById("room").value;
@@ -64,16 +160,14 @@ function joinRoom() {
   });
 }
 
-/* START GAME */
+/* START */
 function startGame() {
   socket.emit("startGame", currentRoom, (res) => {
-    if (res?.error) {
-      alert(res.error);
-    }
+    if (res?.error) alert(res.error);
   });
 }
 
-/* SEND MESSAGE */
+/* CHAT */
 function send() {
   const message = document.getElementById("msg").value;
 
@@ -84,34 +178,32 @@ function send() {
   });
 }
 
-/* UPDATE PLAYERS */
+/* SOCKET EVENTS */
 socket.on("updatePlayers", updatePlayers);
 
-/* CHAT */
 socket.on("message", (data) => {
   document.getElementById("chat").innerHTML +=
     `<p><b>${data.name}:</b> ${data.message}</p>`;
 });
 
-/* ROLE (IMPOSTOR / CREWMATE) */
 socket.on("role", (data) => {
   if (data.role === "IMPOSTOR") {
     document.getElementById("role").innerText =
-      "IMPOSTOR - podpowiedź: " + data.hint;
+      "🕵️ IMPOSTOR - podpowiedź: " + data.hint;
   } else {
     document.getElementById("role").innerText =
-      "CREWMATE - słowo: " + data.word;
+      "👨‍🚀 CREWMATE - słowo: " + data.word;
   }
 });
 
-/* PLAYERS LIST */
+/* PLAYERS */
 function updatePlayers(players) {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
 
   players.forEach(p => {
     const li = document.createElement("li");
-    li.innerText = p.name;
+    li.innerText = "👤 " + p.name;
     ul.appendChild(li);
   });
 }
