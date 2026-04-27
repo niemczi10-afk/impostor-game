@@ -52,6 +52,8 @@ function emitPlayers(room) {
     hostId: room.hostId,
     phase: room.phase,
     round: room.round,
+    turnOrder: room.turnOrder,
+    currentTurnPlayerId: room.turnOrder[room.turnIndex] || null,
   });
 }
 
@@ -79,13 +81,14 @@ function emitTurn(room) {
     total: room.turnOrder.length,
     round: room.round,
   });
+
+  emitPlayers(room);
 }
 
 function beginRound(room) {
   room.phase = "play";
   room.answers = {};
   room.votes = {};
-  room.turnOrder = shuffleArray(room.players.map((p) => p.id));
   room.turnIndex = 0;
 
   io.to(room.code).emit("roundStart", {
@@ -133,6 +136,10 @@ function startNewGame(room) {
 
   const impostor = pickRandom(room.players);
   room.impostorId = impostor.id;
+
+  // Kolejność odpowiadania losowana tylko raz na całą grę
+  room.turnOrder = shuffleArray(room.players.map((p) => p.id));
+  room.turnIndex = 0;
 
   io.to(room.code).emit("gameReset");
 
@@ -206,15 +213,21 @@ function resolveVote(room) {
 }
 
 function removePlayerFromActiveRound(room, playerId) {
-  if (room.phase === "play") {
-    const removedIndex = room.turnOrder.indexOf(playerId);
-    const currentId = room.turnOrder[room.turnIndex];
+  const orderIndex = room.turnOrder.indexOf(playerId);
 
-    if (removedIndex !== -1) {
-      room.turnOrder.splice(removedIndex, 1);
+  if (orderIndex !== -1) {
+    room.turnOrder.splice(orderIndex, 1);
 
-      if (removedIndex < room.turnIndex) {
-        room.turnIndex -= 1;
+    if (orderIndex < room.turnIndex) {
+      room.turnIndex -= 1;
+    }
+
+    if (room.phase === "play") {
+      const currentId = room.turnOrder[room.turnIndex];
+
+      if (!currentId) {
+        startVotePhase(room);
+        return;
       }
 
       if (playerId === currentId) {
@@ -224,10 +237,6 @@ function removePlayerFromActiveRound(room, playerId) {
           emitTurn(room);
         }
       }
-    }
-
-    if (room.turnOrder.length === 0) {
-      startVotePhase(room);
     }
   }
 
