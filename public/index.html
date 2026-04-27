@@ -6,7 +6,7 @@
   <style>
     body {
       margin: 0;
-      font-family: Arial, sans-serif;
+      font-family: Arial;
       background: #0f172a;
       color: white;
     }
@@ -35,13 +35,12 @@
     }
 
     button {
-      padding: 10px 15px;
-      margin: 5px 0;
+      padding: 10px;
       border-radius: 8px;
       border: none;
-      cursor: pointer;
       background: #3b82f6;
       color: white;
+      cursor: pointer;
     }
 
     button:hover {
@@ -57,7 +56,7 @@
 
     #players li {
       list-style: none;
-      padding: 5px;
+      padding: 6px;
       background: #1f2937;
       margin: 5px 0;
       border-radius: 6px;
@@ -72,15 +71,19 @@
     }
 
     .role {
-      font-size: 20px;
-      margin: 10px 0;
+      font-size: 18px;
+      margin-top: 10px;
       color: #fbbf24;
     }
 
-    .topbar {
-      font-size: 22px;
-      font-weight: bold;
-      margin-bottom: 10px;
+    .turn {
+      margin-top: 10px;
+      color: #22c55e;
+    }
+
+    .disabled {
+      background: #374151 !important;
+      cursor: not-allowed;
     }
   </style>
 </head>
@@ -89,40 +92,46 @@
 
 <div class="container">
 
-  <!-- LEFT PANEL -->
+  <!-- LEFT -->
   <div class="panel">
 
-    <div class="topbar">🎮 Impostor Game</div>
+    <h2>🎮 Impostor</h2>
 
-    <input id="name" placeholder="Twoje imię" />
+    <input id="name" placeholder="Twoje imię">
     <button onclick="createRoom()">Stwórz pokój</button>
 
-    <input id="room" placeholder="Kod pokoju" />
+    <input id="room" placeholder="Kod pokoju">
     <button onclick="joinRoom()">Dołącz</button>
 
     <button onclick="startGame()">Start gry</button>
 
     <div class="card">
-      <div>👥 Gracze:</div>
+      <h3>👥 Gracze</h3>
       <ul id="players"></ul>
     </div>
 
     <div class="card">
-      <div class="role" id="role">Czekanie na grę...</div>
+      <div class="role" id="role">Czekanie...</div>
+      <div class="turn" id="turn">---</div>
+    </div>
+
+    <div class="card">
+      <h3>📜 Historia haseł</h3>
+      <ul id="history"></ul>
     </div>
 
   </div>
 
-  <!-- RIGHT PANEL -->
+  <!-- RIGHT -->
   <div class="game">
 
     <div class="card">
-      <div>💬 Chat</div>
+      <h3>💬 Gra</h3>
       <div id="chat"></div>
     </div>
 
-    <input id="msg" placeholder="napisz wiadomość..." />
-    <button onclick="send()">Wyślij</button>
+    <input id="msg" placeholder="Twoje słowo..." />
+    <button id="sendBtn" onclick="send()">Wyślij</button>
 
   </div>
 
@@ -136,49 +145,60 @@ const socket = io("https://impostor-game-tf4k.onrender.com");
 
 let currentRoom = "";
 let myName = "";
+let myId = null;
+let currentTurnId = null;
 
-/* ROOM */
+/* CONNECT */
+socket.on("connect", () => {
+  myId = socket.id;
+});
+
+/* CREATE ROOM */
 function createRoom() {
   myName = document.getElementById("name").value;
 
   socket.emit("createRoom", myName, (res) => {
     currentRoom = res.roomCode;
-    alert("Kod pokoju: " + currentRoom);
     updatePlayers(res.players);
+    alert("Kod: " + currentRoom);
   });
 }
 
+/* JOIN */
 function joinRoom() {
   myName = document.getElementById("name").value;
-  const roomCode = document.getElementById("room").value;
+  const code = document.getElementById("room").value;
 
-  socket.emit("joinRoom", { roomCode, name: myName }, (res) => {
+  socket.emit("joinRoom", { roomCode: code, name: myName }, (res) => {
     if (res.error) return alert(res.error);
 
-    currentRoom = roomCode;
+    currentRoom = code;
     updatePlayers(res.players);
   });
 }
 
 /* START */
 function startGame() {
-  socket.emit("startGame", currentRoom, (res) => {
-    if (res?.error) alert(res.error);
-  });
+  socket.emit("startGame", currentRoom);
 }
 
-/* CHAT */
+/* SEND */
 function send() {
-  const message = document.getElementById("msg").value;
+  if (myId !== currentTurnId) return;
+
+  const msg = document.getElementById("msg").value;
 
   socket.emit("message", {
     roomCode: currentRoom,
     name: myName,
-    message
+    message: msg
   });
+
+  document.getElementById("msg").value = "";
 }
 
-/* SOCKET EVENTS */
+/* EVENTS */
+
 socket.on("updatePlayers", updatePlayers);
 
 socket.on("message", (data) => {
@@ -189,21 +209,65 @@ socket.on("message", (data) => {
 socket.on("role", (data) => {
   if (data.role === "IMPOSTOR") {
     document.getElementById("role").innerText =
-      "🕵️ IMPOSTOR - podpowiedź: " + data.hint;
+      "🕵️ IMPOSTOR | Podpowiedź: " + data.hint;
   } else {
     document.getElementById("role").innerText =
-      "👨‍🚀 CREWMATE - słowo: " + data.word;
+      "👨‍🚀 CREWMATE | Słowo: " + data.word;
   }
 });
 
-/* PLAYERS */
+/* TURN */
+socket.on("turn", (data) => {
+  currentTurnId = data.playerId;
+
+  if (currentTurnId === myId) {
+    document.getElementById("turn").innerText = "👉 Twoja tura!";
+    enableInput(true);
+  } else {
+    document.getElementById("turn").innerText = "Czekaj na swoją turę...";
+    enableInput(false);
+  }
+});
+
+/* HISTORY */
+socket.on("history", (history) => {
+  const ul = document.getElementById("history");
+  ul.innerHTML = "";
+
+  history.forEach(word => {
+    const li = document.createElement("li");
+    li.innerText = word;
+    ul.appendChild(li);
+  });
+});
+
+/* GAME END */
+socket.on("gameEnd", (data) => {
+  alert(`Wygrywa: ${data.winner}\nSłowo: ${data.word}`);
+});
+
+/* HELPERS */
+
+function enableInput(state) {
+  const input = document.getElementById("msg");
+  const btn = document.getElementById("sendBtn");
+
+  input.disabled = !state;
+
+  if (!state) {
+    btn.classList.add("disabled");
+  } else {
+    btn.classList.remove("disabled");
+  }
+}
+
 function updatePlayers(players) {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
 
   players.forEach(p => {
     const li = document.createElement("li");
-    li.innerText = "👤 " + p.name;
+    li.innerText = p.name;
     ul.appendChild(li);
   });
 }
