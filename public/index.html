@@ -179,6 +179,7 @@
     let roomCode = null;
     let hostId = null;
     let myRole = null;
+    let myNick = null;
     let currentRound = 0;
     let currentTurnPlayerId = null;
     let currentPhase = "lobby";
@@ -272,15 +273,15 @@
     }
 
     document.getElementById("createBtn").addEventListener("click", () => {
-      socket.emit("createRoom", {
-        name: document.getElementById("nick").value,
-      });
+      myNick = document.getElementById("nick").value.trim();
+      socket.emit("createRoom", { name: myNick });
     });
 
     document.getElementById("joinBtn").addEventListener("click", () => {
+      myNick = document.getElementById("nick").value.trim();
       socket.emit("joinRoom", {
         code: document.getElementById("roomCodeInput").value,
-        name: document.getElementById("nick").value,
+        name: myNick,
       });
     });
 
@@ -297,10 +298,22 @@
       }
     });
 
-    socket.on("roomJoined", ({ code, hostId: newHostId }) => {
+    // Automatyczny reconnect — gdy socket się rozłączy i połączy ponownie
+    socket.on("connect", () => {
+      // Jeśli byliśmy już w pokoju, spróbuj się reconnectować
+      if (roomCode && myNick) {
+        socket.emit("joinRoom", { code: roomCode, name: myNick });
+      }
+    });
+
+    socket.on("roomJoined", ({ code, hostId: newHostId, reconnected }) => {
       hostId = newHostId;
       showRoom(code);
       refreshStartButton(currentPhase);
+
+      if (reconnected) {
+        appendChat("Połączono ponownie z pokojem.", true);
+      }
     });
 
     socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round, turnOrder, currentTurnPlayerId: turnPlayerId }) => {
@@ -419,7 +432,7 @@
       refreshStartButton(currentPhase);
     });
 
-    socket.on("gameEnd", ({ winner, word }) => {
+    socket.on("gameEnd", ({ winner, word, impostorName }) => {
       currentPhase = "ended";
       votePanel.classList.add("hidden");
       voteButtons.innerHTML = "";
@@ -429,9 +442,9 @@
       turnLabel.textContent = "Tura: —";
 
       if (winner === "crewmates") {
-        appendChat(`Gra zakończona. Wygrywają crewmates. Hasło: ${word}`, true);
+        appendChat(`Gra zakończona. Wygrywają crewmates! Impostor: ${impostorName}. Hasło: ${word}`, true);
       } else {
-        appendChat(`Gra zakończona. Wygrywa impostor. Hasło: ${word}`, true);
+        appendChat(`Gra zakończona. Wygrywa impostor ${impostorName}! Hasło: ${word}`, true);
       }
 
       refreshStartButton(currentPhase);
