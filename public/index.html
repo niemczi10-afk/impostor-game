@@ -160,7 +160,9 @@ function createRoom() {
   socket.emit("createRoom", myName, (res) => {
     currentRoom = res.roomCode;
     updatePlayers(res.players);
-    alert("Kod: " + currentRoom);
+
+    // reset UI
+    resetUI();
   });
 }
 
@@ -174,6 +176,8 @@ function joinRoom() {
 
     currentRoom = code;
     updatePlayers(res.players);
+
+    resetUI();
   });
 }
 
@@ -216,27 +220,38 @@ socket.on("role", (data) => {
   }
 });
 
-/* TURN */
+/* TURN (POPRAWIONE) */
 socket.on("turn", (data) => {
   currentTurnId = data.playerId;
 
   if (currentTurnId === myId) {
-    document.getElementById("turn").innerText = "👉 Twoja tura!";
+    document.getElementById("turn").innerText =
+      "👉 TWOJA TURA";
     enableInput(true);
   } else {
-    document.getElementById("turn").innerText = "Czekaj na swoją turę...";
+    document.getElementById("turn").innerText =
+      "Tura gracza: " + data.playerName;
     enableInput(false);
   }
 });
 
-/* HISTORY */
+/* HISTORY (POPRAWIONE + DEBUG) */
 socket.on("history", (history) => {
+  console.log("HISTORIA:", history);
+
   const ul = document.getElementById("history");
   ul.innerHTML = "";
 
+  if (!history || history.length === 0) {
+    const li = document.createElement("li");
+    li.innerText = "Brak haseł";
+    ul.appendChild(li);
+    return;
+  }
+
   history.forEach(word => {
     const li = document.createElement("li");
-    li.innerText = word;
+    li.innerText = "🔑 " + word;
     ul.appendChild(li);
   });
 });
@@ -253,14 +268,19 @@ function enableInput(state) {
   const btn = document.getElementById("sendBtn");
 
   input.disabled = !state;
-
-  if (!state) {
-    btn.classList.add("disabled");
-  } else {
-    btn.classList.remove("disabled");
-  }
+  btn.style.opacity = state ? "1" : "0.5";
 }
 
+/* RESET UI (NOWE) */
+function resetUI() {
+  document.getElementById("chat").innerHTML = "";
+  document.getElementById("history").innerHTML = "";
+  document.getElementById("role").innerText = "Czekanie...";
+  document.getElementById("turn").innerText = "---";
+  enableInput(false);
+}
+
+/* PLAYERS */
 function updatePlayers(players) {
   const ul = document.getElementById("players");
   ul.innerHTML = "";
