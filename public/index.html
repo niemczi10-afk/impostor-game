@@ -26,14 +26,14 @@
       border: 1px solid #243041;
       border-radius: 16px;
       padding: 16px;
-      box-shadow: 0 8px 30px rgba(0,0,0,.25);
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25);
     }
 
     h1, h2, h3 {
       margin-top: 0;
     }
 
-    input, button, select {
+    input, button {
       width: 100%;
       box-sizing: border-box;
       padding: 12px;
@@ -55,7 +55,8 @@
       background: #334155;
     }
 
-    button:disabled {
+    button:disabled,
+    input:disabled {
       opacity: 0.5;
       cursor: not-allowed;
     }
@@ -107,6 +108,7 @@
     .small {
       font-size: 0.92rem;
       color: #94a3b8;
+      margin-bottom: 10px;
     }
   </style>
 </head>
@@ -126,6 +128,7 @@
       <div id="roomPanel" class="hidden">
         <div class="pill" id="roomCodeLabel">Pokój: —</div>
         <div class="pill" id="roundLabel">Runda: —</div>
+        <div class="pill" id="turnLabel">Tura: —</div>
 
         <button id="startBtn" class="hidden">Start gry</button>
         <div class="small" id="roleLabel"></div>
@@ -142,7 +145,7 @@
       </div>
 
       <div class="row">
-        <input id="messageInput" placeholder="Wpisz odpowiedź..." />
+        <input id="messageInput" placeholder="Wpisz odpowiedź..." disabled />
         <button id="sendBtn">Wyślij odpowiedź</button>
       </div>
 
@@ -162,11 +165,13 @@
     let hostId = null;
     let myRole = null;
     let currentRound = 0;
+    let currentTurnPlayerId = null;
 
     const lobbyPanel = document.getElementById("lobbyPanel");
     const roomPanel = document.getElementById("roomPanel");
     const roomCodeLabel = document.getElementById("roomCodeLabel");
     const roundLabel = document.getElementById("roundLabel");
+    const turnLabel = document.getElementById("turnLabel");
     const playersList = document.getElementById("playersList");
     const chatList = document.getElementById("chatList");
     const roleLabel = document.getElementById("roleLabel");
@@ -174,11 +179,13 @@
     const votePanel = document.getElementById("votePanel");
     const voteButtons = document.getElementById("voteButtons");
     const voteInfo = document.getElementById("voteInfo");
+    const messageInput = document.getElementById("messageInput");
 
     function appendChat(text, system = false) {
       const li = document.createElement("li");
       li.textContent = system ? `• ${text}` : text;
       chatList.appendChild(li);
+
       const box = document.querySelector(".chat-box");
       box.scrollTop = box.scrollHeight;
     }
@@ -189,6 +196,7 @@
 
     function renderPlayers(players) {
       playersList.innerHTML = "";
+
       players.forEach((p) => {
         const li = document.createElement("li");
         li.textContent = p.name + (p.id === hostId ? " — host" : "");
@@ -196,8 +204,9 @@
       });
     }
 
-    function setHostControls() {
-      startBtn.classList.toggle("hidden", socket.id !== hostId);
+    function setMessageState() {
+      const canWrite = currentTurnPlayerId === socket.id && votePanel.classList.contains("hidden") === true;
+      messageInput.disabled = !canWrite;
     }
 
     function showRoom(code) {
@@ -207,11 +216,18 @@
       roomCodeLabel.textContent = `Pokój: ${code}`;
     }
 
-    function sendVote(target) {
-      socket.emit("vote", { code: roomCode, target });
-      votePanel.classList.add("hidden");
-      voteButtons.innerHTML = "";
-      voteInfo.textContent = "";
+    function refreshStartButton(phase) {
+      const isHost = socket.id === hostId;
+      startBtn.classList.toggle("hidden", !(isHost && phase === "lobby"));
+    }
+
+    function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text) return;
+      if (messageInput.disabled) return;
+
+      socket.emit("message", { code: roomCode, text });
+      messageInput.value = "";
     }
 
     document.getElementById("createBtn").addEventListener("click", () => {
@@ -231,27 +247,29 @@
       socket.emit("startGame", { code: roomCode });
     });
 
-    document.getElementById("sendBtn").addEventListener("click", () => {
-      const input = document.getElementById("messageInput");
-      const text = input.value.trim();
-      if (!text) return;
+    document.getElementById("sendBtn").addEventListener("click", sendMessage);
 
-      socket.emit("message", { code: roomCode, text });
-      input.value = "";
+    messageInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendMessage();
+      }
     });
 
     socket.on("roomJoined", ({ code, hostId: newHostId }) => {
       hostId = newHostId;
       showRoom(code);
-      setHostControls();
+      refreshStartButton("lobby");
     });
 
-    socket.on("updatePlayers", ({ players, hostId: newHostId, round }) => {
+    socket.on("updatePlayers", ({ players, hostId: newHostId, phase, round }) => {
       hostId = newHostId;
       currentRound = round || currentRound || 0;
+
       roundLabel.textContent = `Runda: ${currentRound || "—"}`;
       renderPlayers(players);
-      setHostControls();
+      refreshStartButton(phase);
+      setMessageState();
     });
 
     socket.on("role", (data) => {
@@ -267,6 +285,24 @@
     socket.on("roundStart", ({ round }) => {
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
+      votePanel.classList.add("hidden");
+      voteButtons.innerHTML = "";
+      voteInfo.textContent = "";
+    });
+
+    socket.on("turnStart", ({ playerId, playerName, turnNumber, total, round }) => {
+      currentTurnPlayerId = playerId;
+      currentRound = round;
+      roundLabel.textContent = `Runda: ${round}`;
+      turnLabel.textContent = playerId === socket.id
+        ? `Twoja tura (${turnNumber}/${total})`
+        : `Tura: ${playerName} (${turnNumber}/${total})`;
+
+      setMessageState();
+
+      if (playerId === socket.id) {
+        messageInput.focus();
+      }
     });
 
     socket.on("gameReset", () => {
@@ -275,6 +311,10 @@
       voteButtons.innerHTML = "";
       voteInfo.textContent = "";
       roleLabel.textContent = "";
+      turnLabel.textContent = "Tura: —";
+      currentTurnPlayerId = null;
+      messageInput.value = "";
+      messageInput.disabled = true;
     });
 
     socket.on("message", (data) => {
@@ -282,32 +322,45 @@
         appendChat(data.text, true);
         return;
       }
+
       appendChat(`${data.playerName}: ${data.text}`);
     });
 
     socket.on("voteStart", ({ round, players }) => {
       currentRound = round;
       roundLabel.textContent = `Runda: ${round}`;
+
       votePanel.classList.remove("hidden");
       voteButtons.innerHTML = "";
       voteInfo.textContent = "Wybierz gracza albo wstrzymaj się od głosu.";
 
-      const myId = socket.id;
+      messageInput.disabled = true;
+      currentTurnPlayerId = null;
+      turnLabel.textContent = "Tura: głosowanie";
 
       players.forEach((player) => {
-        const isSelfAndImpostor = myRole === "impostor" && player.id === myId;
-        if (isSelfAndImpostor) return;
+        if (player.id === socket.id) return;
 
         const btn = document.createElement("button");
         btn.textContent = `Głosuję na: ${player.name}`;
-        btn.addEventListener("click", () => sendVote(player.id));
+        btn.addEventListener("click", () => {
+          socket.emit("vote", { code: roomCode, target: player.id });
+          votePanel.classList.add("hidden");
+          voteButtons.innerHTML = "";
+          voteInfo.textContent = "";
+        });
         voteButtons.appendChild(btn);
       });
 
       const abstainBtn = document.createElement("button");
       abstainBtn.className = "secondary";
       abstainBtn.textContent = "Wstrzymaj się od głosu";
-      abstainBtn.addEventListener("click", () => sendVote(null));
+      abstainBtn.addEventListener("click", () => {
+        socket.emit("vote", { code: roomCode, target: null });
+        votePanel.classList.add("hidden");
+        voteButtons.innerHTML = "";
+        voteInfo.textContent = "";
+      });
       voteButtons.appendChild(abstainBtn);
     });
 
@@ -315,6 +368,9 @@
       votePanel.classList.add("hidden");
       voteButtons.innerHTML = "";
       voteInfo.textContent = "";
+      messageInput.disabled = true;
+      currentTurnPlayerId = null;
+      turnLabel.textContent = "Tura: —";
 
       if (winner === "crewmates") {
         appendChat(`Gra zakończona. Wygrywają crewmates. Hasło: ${word}`, true);
