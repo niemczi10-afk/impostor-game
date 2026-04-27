@@ -17,17 +17,39 @@ io.on("connection", (socket) => {
   console.log("Nowy gracz:", socket.id);
 
   // CREATE ROOM
-  socket.on("createRoom", (name, callback) => {
-    const roomCode = Math.random().toString(36).substring(2, 6).toUpperCase();
+socket.on("startGame", (roomCode, callback) => {
+  const room = rooms[roomCode];
+  if (!room) return;
 
-    rooms[roomCode] = {
-      players: [{ id: socket.id, name }]
-    };
+  if (room.players.length < 3) {
+    return callback({ error: "Minimum 3 graczy" });
+  }
 
-    socket.join(roomCode);
+  if (room.players.length > 6) {
+    return callback({ error: "Maksymalnie 6 graczy" });
+  }
 
-    callback({ roomCode, players: rooms[roomCode].players });
+  const randomWord = words[Math.floor(Math.random() * words.length)];
+
+  const impostorIndex = Math.floor(Math.random() * room.players.length);
+  const impostorId = room.players[impostorIndex].id;
+
+  room.players.forEach((p) => {
+    if (p.id === impostorId) {
+      io.to(p.id).emit("role", {
+        role: "IMPOSTOR",
+        hint: randomWord.hint
+      });
+    } else {
+      io.to(p.id).emit("role", {
+        role: "CREWMATE",
+        word: randomWord.word
+      });
+    }
   });
+
+  io.to(roomCode).emit("gameStarted");
+});
 
   // JOIN ROOM
   socket.on("joinRoom", ({ roomCode, name }, callback) => {
